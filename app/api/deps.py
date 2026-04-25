@@ -14,7 +14,7 @@ from app.domain.accounts.jwt_service import IJwtService, TokenClaims
 from app.domain.accounts.role import Role
 from app.infrastructure.auth.jose_jwt_service import JoseJwtService
 
-_bearer = HTTPBearer(auto_error=True)
+_bearer = HTTPBearer(auto_error=False)
 
 
 def get_jwt_service() -> IJwtService:
@@ -28,9 +28,15 @@ def get_jwt_service() -> IJwtService:
 
 
 def get_current_user(
-    creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     jwt_service: Annotated[IJwtService, Depends(get_jwt_service)],
 ) -> TokenClaims:
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     decoded = jwt_service.decode(creds.credentials)
     if decoded.is_failure:
         raise HTTPException(
