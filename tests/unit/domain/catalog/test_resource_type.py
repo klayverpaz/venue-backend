@@ -89,16 +89,37 @@ def test_resource_type_attribute_schema_returns_tuple_view():
     assert isinstance(schema, tuple)
 
 
-def test_resource_type_update_metadata_no_invariant_returns_none():
+def test_resource_type_update_metadata_success():
     rt = ResourceType.create(
         slug="football-field", name="Football Field", description="", attribute_schema=[],
     ).value
     before = rt.updated_at
-    result = rt.update_metadata(name="Campo de Futebol", description="atualizado")
-    assert result is None
+    r = rt.update_metadata(name="Campo de Futebol", description="atualizado")
+    assert r.is_success
     assert rt.name.value == "Campo de Futebol"
     assert rt.description.value == "atualizado"
     assert rt.updated_at > before
+
+
+def test_resource_type_update_metadata_propagates_name_failure():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
+    ).value
+    r = rt.update_metadata(name="")
+    assert r.is_failure
+    # Entity should not have mutated.
+    assert rt.name.value == "Football Field"
+
+
+def test_resource_type_update_metadata_no_args_is_noop():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
+    ).value
+    before = rt.updated_at
+    r = rt.update_metadata()
+    assert r.is_success
+    # No-op: updated_at NOT bumped when both args are None.
+    assert rt.updated_at == before
 
 
 def test_resource_type_replace_attribute_schema_success():

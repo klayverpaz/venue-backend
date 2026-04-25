@@ -71,21 +71,43 @@ class ResourceType(BaseEntity):
     def attribute_schema(self) -> tuple[AttributeDefinition, ...]:
         return tuple(self._attribute_schema)
 
-    def update_metadata(self, *, name: str | None = None, description: str | None = None) -> None:
-        """Updates name and/or description from raw input. No invariant — returns None.
-        Validates each VO; if either fails, raises (caller should validate first via VOs).
-        Per §4.4: mutators with no domain invariant return None. The VO factory is the
-        validation gate.
+    def update_metadata(
+        self, *, name: str | None = None, description: str | None = None,
+    ) -> Result[None]:
+        """Updates name and/or description from raw input.
+
+        VO validation failures are entity-level invariants ("name is always a
+        valid Name"), so this returns Result[None] per spec §4.4. Aggregates
+        failures across both fields. No-op when both args are None.
         """
+        if name is None and description is None:
+            return Result.success(None)
+
+        errors: list[str] = []
+        new_name = self.name
+        new_desc = self.description
+
         if name is not None:
             r = Name.create(name)
-            if r.is_success:
-                self.name = r.value
+            if r.is_failure:
+                errors.append(r.error)
+            else:
+                new_name = r.value
+
         if description is not None:
             r = ShortDescription.create(description)
-            if r.is_success:
-                self.description = r.value
+            if r.is_failure:
+                errors.append(r.error)
+            else:
+                new_desc = r.value
+
+        if errors:
+            return Result.failure("; ".join(errors))
+
+        self.name = new_name
+        self.description = new_desc
         self.updated_at = _utcnow()
+        return Result.success(None)
 
     def replace_attribute_schema(self, definitions: Iterable[AttributeDefinition]) -> Result[None]:
         """Wholesale replacement. Enforces unique-key invariant — returns Result[None]."""
