@@ -7,6 +7,7 @@ from app.domain.shared.entity import BaseEntity
 from app.domain.shared.result import Result
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 from app.domain.shared.value_objects.email import Email
+from app.domain.shared.value_objects.name import Name
 
 
 def _utcnow() -> datetime:
@@ -18,7 +19,7 @@ class User(BaseEntity):
     email: Email
     password_hash: str
     role: Role
-    full_name: str
+    full_name: Name
     phone: BrazilianPhone | None = None
     is_active: bool = True
 
@@ -38,20 +39,16 @@ class User(BaseEntity):
         if email_r.is_failure:
             errors.append(email_r.error)
 
-        full_name_clean = (full_name or "").strip()
-        if not full_name_clean:
-            errors.append("full_name: obrigatório.")
+        name_r = Name.create(full_name)
+        if name_r.is_failure:
+            errors.append(name_r.error)
 
         if not password_hash:
-            errors.append("password_hash: obrigatório.")
+            errors.append("PasswordHashCannotBeEmpty")
 
-        phone_vo: BrazilianPhone | None = None
-        if phone is not None and phone.strip():
-            phone_r = BrazilianPhone.create(phone)
-            if phone_r.is_failure:
-                errors.append(phone_r.error)
-            else:
-                phone_vo = phone_r.value
+        phone_r = BrazilianPhone.create_if_not_empty(phone)
+        if phone_r.is_failure:
+            errors.append(phone_r.error)
 
         if errors:
             return Result.failure("; ".join(errors))
@@ -60,8 +57,8 @@ class User(BaseEntity):
             email=email_r.value,
             password_hash=password_hash,
             role=role,
-            full_name=full_name_clean,
-            phone=phone_vo,
+            full_name=name_r.value,
+            phone=phone_r.value,
         ))
 
     def change_password_hash(self, new_hash: str) -> None:

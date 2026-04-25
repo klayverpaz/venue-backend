@@ -98,6 +98,9 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     DateTimeRange.DATE_TIME_RANGE_NOT_TZ_AWARE: "Datas precisam de fuso horário (tz-aware).",
     DateTimeRange.DATE_TIME_RANGE_NOT_UTC: "Datas precisam estar em UTC.",
     DateTimeRange.DATE_TIME_RANGE_START_MUST_BE_BEFORE_END: "Data inicial deve ser anterior à final.",
+
+    # Handler-level (not VO-bound) codes
+    "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
 }
 
 

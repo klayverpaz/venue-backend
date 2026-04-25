@@ -1,6 +1,7 @@
 from __future__ import annotations
 from app.domain.accounts.role import Role
 from app.domain.accounts.user import User
+from app.domain.shared.value_objects.name import Name
 
 
 def test_create_user_success():
@@ -16,7 +17,7 @@ def test_create_user_success():
     assert str(u.email) == "alice@example.com"
     assert u.password_hash == "$argon2id$..."
     assert u.role is Role.CUSTOMER
-    assert u.full_name == "Alice Almeida"
+    assert u.full_name.value == "Alice Almeida"
     assert str(u.phone) == "+5511999999999"
     assert u.is_active is True
 
@@ -45,6 +46,43 @@ def test_create_user_invalid_email():
     assert "email" in r.error.lower()
 
 
+def test_user_full_name_is_name_vo():
+    r = User.create(
+        email="user@example.com",
+        password_hash="$2b$12$abcdefghijklmnopqrstuv",
+        role=Role.CUSTOMER,
+        full_name="Maria da Silva",
+        phone=None,
+    )
+    assert r.is_success
+    assert isinstance(r.value.full_name, Name)
+    assert r.value.full_name.value == "Maria da Silva"
+
+
+def test_user_create_propagates_name_validation_error():
+    r = User.create(
+        email="user@example.com",
+        password_hash="$2b$12$abcdefghijklmnopqrstuv",
+        role=Role.CUSTOMER,
+        full_name="",
+        phone=None,
+    )
+    assert r.is_failure
+    assert Name.NAME_CANNOT_BE_EMPTY in r.error
+
+
+def test_user_create_propagates_name_max_length_error():
+    r = User.create(
+        email="user@example.com",
+        password_hash="$2b$12$abcdefghijklmnopqrstuv",
+        role=Role.CUSTOMER,
+        full_name="a" * 501,
+        phone=None,
+    )
+    assert r.is_failure
+    assert Name.NAME_CANNOT_BE_GREATER_THAN_MAX_LENGTH in r.error
+
+
 def test_create_user_blank_full_name():
     r = User.create(
         email="alice@example.com",
@@ -54,7 +92,7 @@ def test_create_user_blank_full_name():
         phone=None,
     )
     assert r.is_failure
-    assert "full_name" in r.error or "nome" in r.error.lower()
+    assert Name.NAME_CANNOT_BE_EMPTY in r.error
 
 
 def test_change_password_hash_updates_timestamp():

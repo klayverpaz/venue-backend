@@ -44,7 +44,7 @@ async def test_add_and_get_by_id(session):
     assert fetched is not None
     assert str(fetched.email) == "alice@example.com"
     assert fetched.role is Role.CUSTOMER
-    assert fetched.full_name == "Alice"
+    assert fetched.full_name.value == "Alice"
 
 
 @pytest.mark.asyncio

@@ -68,7 +68,7 @@ def test_no_orphan_translations_in_mapping():
     orphans = sorted(set(ERROR_MESSAGES_PT_BR) - declared_codes)
     # Allow handler-level codes by listing them here as the pattern emerges in
     # later plans. For now (Plan 03), only VO-level codes exist.
-    handler_level_allowlist: set[str] = set()
+    handler_level_allowlist: set[str] = {"PasswordHashCannotBeEmpty"}
     real_orphans = [c for c in orphans if c not in handler_level_allowlist]
 
     assert not real_orphans, (

@@ -9,6 +9,7 @@ from app.domain.accounts.user import User
 from app.domain.accounts.repository import IUserRepository
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 from app.domain.shared.value_objects.email import Email
+from app.domain.shared.value_objects.name import Name
 from app.infrastructure.db.mappings.user import UserModel
 from app.infrastructure.repositories.base_repository import BaseRepository
 
@@ -47,7 +48,7 @@ class UserRepository(BaseRepository[UserModel], IUserRepository):
         row.email = user.email.value
         row.password_hash = user.password_hash
         row.role = user.role.value
-        row.full_name = user.full_name
+        row.full_name = user.full_name.value
         row.phone_number = user.phone.value if user.phone else None
         row.is_active = user.is_active
         row.updated_at = user.updated_at
@@ -59,7 +60,7 @@ class UserRepository(BaseRepository[UserModel], IUserRepository):
             email=u.email.value,
             password_hash=u.password_hash,
             role=u.role.value,
-            full_name=u.full_name,
+            full_name=u.full_name.value,
             phone_number=u.phone.value if u.phone else None,
             is_active=u.is_active,
             created_at=u.created_at,
@@ -79,7 +80,7 @@ class UserRepository(BaseRepository[UserModel], IUserRepository):
             email=Email(value=row.email),
             password_hash=row.password_hash,
             role=Role(row.role),
-            full_name=row.full_name,
+            full_name=Name(value=row.full_name),
             phone=phone_vo,
             is_active=row.is_active,
             created_at=row.created_at,

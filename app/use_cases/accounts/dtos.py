@@ -23,7 +23,7 @@ class UserDto:
             id=u.id,
             email=str(u.email),
             role=u.role,
-            full_name=u.full_name,
+            full_name=u.full_name.value,
             phone=str(u.phone) if u.phone else None,
             is_active=u.is_active,
             created_at=u.created_at,
