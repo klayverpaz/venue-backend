@@ -113,6 +113,8 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "UnknownAttributeKey": "Atributo desconhecido — não está no schema do tipo.",
     "AttributeTypeMismatch": "Valor do atributo não bate com o tipo declarado.",
     "AttributeEnumValueNotAllowed": "Valor do atributo enum fora dos valores permitidos.",
+    "SlugAlreadyTaken": "Slug já está em uso.",
+    "ResourceTypeNotFound": "Tipo de recurso não encontrado.",
 }
 
 
