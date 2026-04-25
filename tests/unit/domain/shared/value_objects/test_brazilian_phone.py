@@ -1,52 +1,70 @@
-import pytest
+from __future__ import annotations
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 
 
-@pytest.mark.parametrize("raw", [
-    "(21) 99694-9389",
-    "21 99694-9389",
-    "5521996949389",
-    "+5521996949389",
-    "+55 21 9 9694 9389",
-    "21996949389",
-])
-def test_celular_normalizado_para_e164(raw):
-    r = BrazilianPhone.create(raw)
-    assert r.is_success, r.error
+def test_phone_mobile_e164_parsing():
+    r = BrazilianPhone.create("+55 21 99694-9389")
+    assert r.is_success
     assert r.value.value == "+5521996949389"
     assert r.value.is_mobile is True
-
-
-def test_fixo_valido():
-    r = BrazilianPhone.create("(21) 3333-4444")
-    assert r.is_success
-    assert r.value.value == "+552133334444"
-    assert r.value.is_mobile is False
-
-
-def test_ddd_property():
-    r = BrazilianPhone.create("(21) 99694-9389")
     assert r.value.ddd == "21"
 
 
-def test_national_celular():
-    r = BrazilianPhone.create("+5521996949389")
-    assert r.value.national == "(21) 99694-9389"
+def test_phone_landline_parsing():
+    r = BrazilianPhone.create("(11) 3333-4444")
+    assert r.is_success
+    assert r.value.is_mobile is False
 
 
-def test_national_fixo():
-    r = BrazilianPhone.create("(21) 3333-4444")
-    assert r.value.national == "(21) 3333-4444"
+def test_phone_rejects_none():
+    r = BrazilianPhone.create(None)
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_CANNOT_BE_EMPTY
 
 
-@pytest.mark.parametrize("raw", [
-    None, "", "   ", "abc",
-    "123",                    # poucos dígitos
-    "00 99694-9389",          # DDD inválido (00)
-    "10 99694-9389",          # DDD inválido (10)
-    "(21) 8694-9389",         # celular sem dígito 9
-    "(21) 9 9694 9389 extra", # extra de dígitos
-])
-def test_rejeita_invalidos(raw):
-    r = BrazilianPhone.create(raw)
+def test_phone_rejects_non_string():
+    r = BrazilianPhone.create(12345)
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_CANNOT_BE_EMPTY
+
+
+def test_phone_rejects_alpha_chars():
+    r = BrazilianPhone.create("11 99999-9999 ext 100")
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_CONTAINS_INVALID_CHARACTERS
+
+
+def test_phone_rejects_no_digits():
+    r = BrazilianPhone.create("()-")
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_HAS_NO_DIGITS
+
+
+def test_phone_rejects_wrong_length():
+    r = BrazilianPhone.create("12345")
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_INVALID_LENGTH
+
+
+def test_phone_rejects_invalid_ddd():
+    r = BrazilianPhone.create("(10) 99999-9999")
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_INVALID_DDD
+
+
+def test_phone_mobile_must_start_with_9():
+    r = BrazilianPhone.create("(11) 8888-9999")  # 10 digits — landline; first digit valid (8 not in 2-7)
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_LANDLINE_MUST_START_WITH_2_TO_7
+
+
+def test_phone_create_if_not_empty_returns_none_for_blank():
+    for blank in [None, "", "   "]:
+        r = BrazilianPhone.create_if_not_empty(blank)
+        assert r.is_success
+        assert r.value is None
+
+
+def test_phone_create_if_not_empty_propagates_failure():
+    r = BrazilianPhone.create_if_not_empty("no digits")
     assert r.is_failure

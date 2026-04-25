@@ -21,40 +21,45 @@ _VALID_DDDS = {
 
 @dataclass(frozen=True, slots=True)
 class BrazilianPhone(BaseValueObject):
+    PHONE_CANNOT_BE_EMPTY = "PhoneCannotBeEmpty"
+    PHONE_CONTAINS_INVALID_CHARACTERS = "PhoneContainsInvalidCharacters"
+    PHONE_HAS_NO_DIGITS = "PhoneHasNoDigits"
+    PHONE_INVALID_LENGTH = "PhoneInvalidLength"
+    PHONE_INVALID_DDD = "PhoneInvalidDdd"
+    PHONE_MOBILE_MUST_START_WITH_9 = "PhoneMobileMustStartWith9"
+    PHONE_LANDLINE_MUST_START_WITH_2_TO_7 = "PhoneLandlineMustStartWith2To7"
+
     value: str           # E.164: "+5521996949389"
     is_mobile: bool
 
     @classmethod
     def create(cls, raw) -> Result[Self]:
         if raw is None or not isinstance(raw, str):
-            return Result.failure("BrazilianPhone: valor obrigatório.")
-        # Reject if raw contains alphabetic characters (e.g. "extra" appended)
+            return Result.failure(cls.PHONE_CANNOT_BE_EMPTY)
         if re.search(r"[a-zA-Z]", raw):
-            return Result.failure(f"BrazilianPhone: '{raw}' contém caracteres inválidos.")
+            return Result.failure(cls.PHONE_CONTAINS_INVALID_CHARACTERS)
         digits = _DIGITS_RE.sub("", raw)
         if not digits:
-            return Result.failure(f"BrazilianPhone: '{raw}' sem dígitos.")
-
-        # Remove DDI 55 se presente
+            return Result.failure(cls.PHONE_HAS_NO_DIGITS)
         if len(digits) in (12, 13) and digits.startswith("55"):
             digits = digits[2:]
-
         if len(digits) not in (10, 11):
-            return Result.failure(
-                f"BrazilianPhone: '{raw}' deve ter 10 (fixo) ou 11 (celular) dígitos após o DDI."
-            )
-
+            return Result.failure(cls.PHONE_INVALID_LENGTH)
         ddd = int(digits[:2])
         if ddd not in _VALID_DDDS:
-            return Result.failure(f"BrazilianPhone: DDD inválido ({ddd}).")
-
+            return Result.failure(cls.PHONE_INVALID_DDD)
         is_mobile = len(digits) == 11
         if is_mobile and digits[2] != "9":
-            return Result.failure("BrazilianPhone: celular deve começar com 9 após DDD.")
+            return Result.failure(cls.PHONE_MOBILE_MUST_START_WITH_9)
         if not is_mobile and digits[2] not in "234567":
-            return Result.failure("BrazilianPhone: número fixo deve começar com dígito entre 2 e 7.")
-
+            return Result.failure(cls.PHONE_LANDLINE_MUST_START_WITH_2_TO_7)
         return Result.success(cls(value=f"+55{digits}", is_mobile=is_mobile))
+
+    @classmethod
+    def create_if_not_empty(cls, raw) -> Result[Self | None]:
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return Result.success(None)
+        return cls.create(raw)
 
     @property
     def ddd(self) -> str:
