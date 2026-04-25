@@ -12,6 +12,7 @@ Adding a new VO error code:
 """
 from __future__ import annotations
 
+from app.domain.catalog.attribute import AttributeDefinition
 from app.domain.shared.value_objects.attribute_key import AttributeKey
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 from app.domain.shared.value_objects.cancellation_cutoff import CancellationCutoff
@@ -98,6 +99,10 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     DateTimeRange.DATE_TIME_RANGE_NOT_TZ_AWARE: "Datas precisam de fuso horário (tz-aware).",
     DateTimeRange.DATE_TIME_RANGE_NOT_UTC: "Datas precisam estar em UTC.",
     DateTimeRange.DATE_TIME_RANGE_START_MUST_BE_BEFORE_END: "Data inicial deve ser anterior à final.",
+
+    # AttributeDefinition (catalog VO)
+    AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES: "Atributo do tipo enum precisa de valores possíveis.",
+    AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES: "Atributo que não é enum não pode ter valores possíveis.",
 
     # Handler-level (not VO-bound) codes
     "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
