@@ -1,0 +1,77 @@
+"""Architecture test: every VO error code must have a pt-BR translation.
+
+Catches the failure mode where someone adds a new constant on a VO but
+forgets to add the corresponding entry in app/api/error_codes.py. CI
+fails before the gap reaches main.
+"""
+from __future__ import annotations
+import importlib
+import inspect
+import pkgutil
+from app.domain.shared import value_objects as value_objects_pkg
+from app.domain.shared.value_object import BaseValueObject
+from app.api.error_codes import ERROR_MESSAGES_PT_BR
+
+
+def _collect_vo_classes():
+    classes = []
+    for mod_info in pkgutil.iter_modules(value_objects_pkg.__path__):
+        module = importlib.import_module(f"{value_objects_pkg.__name__}.{mod_info.name}")
+        for _name, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                obj is not BaseValueObject
+                and issubclass(obj, BaseValueObject)
+                and obj.__module__ == module.__name__
+            ):
+                classes.append(obj)
+    return classes
+
+
+def _collect_error_codes(vo_class) -> list[tuple[str, str]]:
+    """Return (constant_name, code_value) pairs declared on the VO class."""
+    codes = []
+    for attr_name in dir(vo_class):
+        if attr_name.startswith("_"):
+            continue
+        if attr_name.isupper():
+            value = getattr(vo_class, attr_name)
+            # Stable code identifiers are PascalCase strings without spaces.
+            # Filter out MAX_LENGTH-style numeric, ALLOWED-style frozenset, etc.
+            if isinstance(value, str) and value and value[0].isupper() and " " not in value:
+                codes.append((attr_name, value))
+    return codes
+
+
+def test_every_vo_error_code_has_pt_br_translation():
+    missing: list[str] = []
+    for vo_class in _collect_vo_classes():
+        for const_name, code in _collect_error_codes(vo_class):
+            if code not in ERROR_MESSAGES_PT_BR:
+                missing.append(f"{vo_class.__name__}.{const_name} = {code!r}")
+
+    assert not missing, (
+        "These VO error codes have no pt-BR translation in "
+        "app/api/error_codes.py:\n  " + "\n  ".join(missing)
+    )
+
+
+def test_no_orphan_translations_in_mapping():
+    """Every key in ERROR_MESSAGES_PT_BR must originate from a VO constant.
+
+    Prevents stale entries lingering after a VO code is renamed or removed.
+    """
+    declared_codes: set[str] = set()
+    for vo_class in _collect_vo_classes():
+        for _const_name, code in _collect_error_codes(vo_class):
+            declared_codes.add(code)
+
+    orphans = sorted(set(ERROR_MESSAGES_PT_BR) - declared_codes)
+    # Allow handler-level codes by listing them here as the pattern emerges in
+    # later plans. For now (Plan 03), only VO-level codes exist.
+    handler_level_allowlist: set[str] = set()
+    real_orphans = [c for c in orphans if c not in handler_level_allowlist]
+
+    assert not real_orphans, (
+        "These pt-BR mapping keys do not match any VO error code:\n  "
+        + "\n  ".join(real_orphans)
+    )
