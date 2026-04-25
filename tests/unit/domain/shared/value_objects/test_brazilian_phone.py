@@ -52,10 +52,18 @@ def test_phone_rejects_invalid_ddd():
     assert r.error == BrazilianPhone.PHONE_INVALID_DDD
 
 
-def test_phone_mobile_must_start_with_9():
-    r = BrazilianPhone.create("(11) 8888-9999")  # 10 digits — landline; first digit valid (8 not in 2-7)
+def test_phone_landline_must_start_with_2_to_7():
+    # 10 digits — landline branch; first digit 8 fails "must start with 2..7".
+    r = BrazilianPhone.create("(11) 8888-9999")
     assert r.is_failure
     assert r.error == BrazilianPhone.PHONE_LANDLINE_MUST_START_WITH_2_TO_7
+
+
+def test_phone_mobile_must_start_with_9():
+    # 11 digits — mobile branch; third digit 8 (not 9) fails "must start with 9 after DDD".
+    r = BrazilianPhone.create("(11) 88888-9999")
+    assert r.is_failure
+    assert r.error == BrazilianPhone.PHONE_MOBILE_MUST_START_WITH_9
 
 
 def test_phone_create_if_not_empty_returns_none_for_blank():
