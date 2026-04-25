@@ -22,29 +22,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
     init_engine()
     pool = build_redis_pool()
     redis_client = redis_lib.Redis(connection_pool=pool)
     app.state.redis_client = redis_client
     app.state.redis_pool = pool
-
-    # AI module opcional — só carrega se provider != 'none'
-    if settings.ai_provider != "none":
-        from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-        from app.ai.graph import build_chat_graph
-        from app.api.v1.ai_chat import router as ai_chat_router
-
-        checkpointer = AsyncRedisSaver(
-            redis_client=redis_client,
-            ttl={"default_ttl": 7200, "refresh_on_read": True},
-        )
-        await checkpointer.asetup()
-        app.state.chat_graph = build_chat_graph().compile(checkpointer=checkpointer)
-        app.include_router(ai_chat_router)
-        logger.info("AI module ativado (provider=%s).", settings.ai_provider)
-    else:
-        logger.info("AI module desativado (BACKEND_AI_PROVIDER=none).")
 
     logger.info("Startup completo.")
     yield
