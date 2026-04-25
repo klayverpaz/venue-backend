@@ -1,12 +1,10 @@
 # Plan 04 — `catalog` feature (`ResourceType` aggregate)
 
-> **STATUS: PRE-RELEASE / NEEDS REVISION.** Originally drafted as Plan 03 before the VO foundation work was inserted as the new Plan 03 (see `docs/superpowers/specs/2026-04-25-venue-backend-design.md` §8). The mechanical structure (file layout, task split, units A/B/C/D) is still valid, but the **content** must be revised after Plan 03 completes to use the VOs that ship there: `Slug`, `Name`, `ShortDescription`, `AttributeKey`, `ShortName`, plus the entity convention from spec §4.4. Do NOT execute this plan as-is.
->
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the `catalog` feature from scratch — `ResourceType` aggregate with a list of `AttributeDefinition` VOs, admin CRUD endpoints (`POST/GET/PATCH/DELETE /v1/admin/resource-types`), public listing (`GET /v1/catalog/resource-types`), and a `validate_attributes(values)` helper that the future `resources` feature will use to validate `Resource.base_attributes`. Leave `feat/plan-04-catalog` ready to ff-merge into `main` with all tests green.
+**Goal:** Build the `catalog` feature from scratch — `ResourceType` aggregate composed of `AttributeDefinition` VOs, admin CRUD endpoints (`POST/GET/PATCH/DELETE /v1/admin/resource-types`), public listing (`GET /v1/catalog/resource-types`), and a `validate_attributes(values)` helper that the future `resources` feature (Plan 06) will use to validate `Resource.base_attributes`. Leave `feat/plan-04-catalog` ready to ff-merge into `main` with all tests green.
 
-**Architecture:** New domain feature `catalog/` with one aggregate (`ResourceType`) and one port (`IResourceTypeRepository`). One new shared VO (`Slug`) lives in `app/domain/shared/value_objects/` because the future `resources` feature will reuse it. `attribute_schema` is persisted as a JSON column on the `resource_types` table (works on Postgres + SQLite). Admin endpoints reuse the existing `require_role(Role.ADMIN)` guard from `app/api/deps.py`; public listing has no auth gate. No cross-feature handlers in this plan — `catalog` has zero feature dependencies (per spec §8 "Bootstrap procedure").
+**Architecture:** New domain feature `catalog/` with one aggregate (`ResourceType`) and one port (`IResourceTypeRepository`). All VOs already shipped by Plan 03 (`Slug`, `Name`, `ShortDescription`, `AttributeKey`, `ShortName`); this plan creates only one new VO local to the feature: `AttributeDefinition` (composite). `attribute_schema` is persisted as a JSON column on the `resource_types` table (works on Postgres + SQLite). Admin endpoints reuse the existing `require_role(Role.ADMIN)` guard from `app/api/deps.py`; public listing has no auth gate. No cross-feature handlers in this plan — `catalog` has zero feature dependencies (per spec §8 step 4). Entity follows the spec §4.4 convention: class-level error codes, `cls.create()` factory, mutators returning `Result[None]` when enforcing invariants, private collections with immutable views, `updated_at` bumped inside every successful mutator.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic. No new third-party libraries — JSON storage uses SQLAlchemy's built-in `JSON` type which adapts to Postgres `JSON` and SQLite `TEXT`.
 
@@ -14,31 +12,39 @@
 
 | # | Decision | Rationale |
 |---|---|---|
-| 1 | `Slug` is a shared VO under `app/domain/shared/value_objects/slug.py`. | Resources will also have a slug; spec §5.3. |
+| 1 | Reuse `Slug`, `Name`, `ShortDescription`, `AttributeKey`, `ShortName` from `app/domain/shared/value_objects/` (shipped in Plan 03). | These are now part of the platform-wide convention. |
 | 2 | `AttrType` is a `str` Enum with values `string`, `int`, `bool`, `enum` (lowercase). | Matches JSON wire format; no need to translate at the API boundary. |
-| 3 | `AttributeDefinition.enum_values` is non-None **iff** `data_type == AttrType.ENUM`. Validated in `AttributeDefinition.create()`. | Keeps the VO self-consistent; eliminates a class of "ENUM with no values" bugs. |
+| 3 | `AttributeDefinition.enum_values` is non-`None` **iff** `data_type == AttrType.ENUM`. Validated in `AttributeDefinition.create()`. | Keeps the VO self-consistent; eliminates a class of "ENUM with no values" or "STRING with stale values" bugs. |
 | 4 | `attribute_schema` is persisted as a JSON column (`sa.JSON()` — generic, dialect-portable). The repository serializes `AttributeDefinition` ↔ dict at the boundary. | Avoids a separate `attribute_definitions` table for what is conceptually a typed list; simple to query, simple to evolve. |
 | 5 | `UpdateResourceTypeHandler` accepts partial updates (name/description/attribute_schema/is_active) but `attribute_schema` is REPLACED wholesale when provided (no per-key patching). | Per-key patching is harder to validate consistently; replacement is what the admin UI will do anyway. |
-| 6 | `DeleteResourceTypeHandler` does **NOT** check whether any `Resource` references this type. The "blocked if referenced" invariant from spec §5.2 is deferred to Plan 04 (`resources`), which will inject `IResourceRepository` and add the check. A `# TODO(plan-04)` comment marks the gap. | `Resource` does not exist yet — the check would be vacuous now. Adding a Protocol stub now would just be ceremony. |
-| 7 | Pagination uses `limit` + `offset` query params on list endpoints, mirroring `app/api/v1/admin_users/routes.py`. | Consistency with `accounts`. |
-| 8 | Public list (`GET /v1/catalog/resource-types`) returns ONLY `is_active = True` rows. Admin list (`GET /v1/admin/resource-types`) returns all rows including inactive. | Public is for filter UI on the storefront; admin is for management. |
-| 9 | Error messages in domain validation are Portuguese (matches `accounts/`). Error messages in handler-level errors are Portuguese. API field-validation errors stay in the language Pydantic produces (English) — no extra translation layer. | Project convention from Plan 02. |
+| 6 | `DeleteResourceTypeHandler` does **NOT** check whether any `Resource` references this type. The "blocked if referenced" invariant from spec §5.2 is deferred to Plan 06 (`resources`), which will inject `IResourceRepository` and add the check. A `# TODO(plan-06)` comment marks the gap. | `Resource` does not exist yet — the check would be vacuous. Adding a Protocol stub now is ceremony. |
+| 7 | Pagination uses `limit` + `offset` query params on list endpoints, mirroring `app/api/v1/admin_users/routes.py` from Plan 02. | Consistency with `accounts`. |
+| 8 | Public list (`GET /v1/catalog/resource-types`) returns ONLY `is_active = True` rows. Admin list (`GET /v1/admin/resource-types`) returns all rows including inactive. | Public is the storefront filter UI; admin is for management. |
+| 9 | Domain & handler errors are stable PascalCase code identifiers (e.g., `"SlugAlreadyTaken"`); pt-BR translation lives in `app/api/error_codes.py`. New handler-level codes added by this plan must include their pt-BR entry and be added to the architecture-test allowlist. | Spec §3 decision 15; same pattern as Plan 03. |
 | 10 | No `ListResourceTypesQuery` / `GetResourceTypeQuery` handlers. List + detail are pure DB reads; routes call the repo directly. | Mirrors `admin_users/routes.py` from Plan 02 — no business logic worth wrapping. |
-| 11 | The `validate_attributes(values: dict[str, Any]) -> Result[None]` method lives on the `ResourceType` entity (not on a separate validator). | The schema lives on the entity; co-locating the validator keeps callers simple — `resource_type.validate_attributes(...)`. |
+| 11 | The `validate_attributes(values: dict[str, Any]) -> Result[None]` method lives on the `ResourceType` entity. | The schema lives on the entity; co-locating the validator keeps callers simple — `resource_type.validate_attributes(...)`. |
+| 12 | DB string columns use `Text` (no `VARCHAR(N)`) — VO governs length per spec §3 decision 17. | Same as `UserModel` in Plan 03. |
 
 ---
 
-## File Structure
+## Branch
+
+```bash
+git checkout -b feat/plan-04-catalog
+```
+
+All tasks below assume this branch is checked out.
+
+---
+
+## File structure
 
 ### New files
 
 ```
-app/domain/shared/value_objects/
-└── slug.py                                       # Slug VO (shared with future Resource)
-
 app/domain/catalog/
 ├── __init__.py
-├── attribute.py                                  # AttrType enum + AttributeDefinition VO
+├── attribute.py                                  # AttrType enum + AttributeDefinition composite VO
 ├── resource_type.py                              # ResourceType aggregate (incl. validate_attributes)
 └── repository.py                                 # IResourceTypeRepository Protocol
 
@@ -77,14 +83,13 @@ app/migrations/versions/
 ```
 app/api/v1/router.py                              # include admin_resource_types_router + catalog_router
 app/migrations/env.py                             # import the new mapping module
+app/api/error_codes.py                            # add catalog handler-level codes (pt-BR)
+tests/unit/architecture/test_error_code_coverage.py  # extend handler_level_allowlist
 ```
 
 ### Test files (new)
 
 ```
-tests/unit/domain/shared/value_objects/
-└── test_slug.py
-
 tests/unit/domain/catalog/
 ├── __init__.py
 ├── test_attribute.py
@@ -117,13 +122,13 @@ A single auto-generated Alembic revision creates the `resource_types` table:
 | Column | Type | Constraints |
 |---|---|---|
 | `id` | CHAR(36) | PK |
-| `slug` | VARCHAR(80) | NOT NULL, UNIQUE, indexed |
-| `name` | VARCHAR(200) | NOT NULL |
-| `description` | VARCHAR(1000) | NOT NULL, default `""` |
+| `slug` | Text | NOT NULL, UNIQUE, indexed |
+| `name` | Text | NOT NULL |
+| `description` | Text | NOT NULL, default `""` |
 | `attribute_schema` | JSON | NOT NULL, default `[]` |
-| `is_active` | BOOLEAN | NOT NULL, default TRUE, indexed |
-| `created_at` | DATETIME | NOT NULL (from `TimestampMixin`) |
-| `updated_at` | DATETIME | NOT NULL (from `TimestampMixin`) |
+| `is_active` | Boolean | NOT NULL, default TRUE, indexed |
+| `created_at` | DateTime(timezone=True) | NOT NULL (from `TimestampMixin`) |
+| `updated_at` | DateTime(timezone=True) | NOT NULL (from `TimestampMixin`) |
 
 No foreign keys. No cross-table joins.
 
@@ -131,324 +136,178 @@ No foreign keys. No cross-table joins.
 
 ## Execution Plan — four units
 
-Each unit is one implementer dispatch. Reviewers (spec compliance + code quality) run between units.
-
 | Unit | Tasks | Approx commits |
 |---|---|---|
-| **A** | Domain layer | 4 |
-| **B** | Infrastructure (mapping + repo + migration) | 3 |
+| **A** | Domain layer (AttrType + AttributeDefinition + ResourceType + Repository protocol) | 4 |
+| **B** | Infrastructure (mapping + migration + repo + integration test) | 3 |
 | **C** | Use cases (Create / Update / Delete handlers + DTOs + fake repo) | 4 |
-| **D** | API layer + e2e tests | 4 |
+| **D** | API layer (admin + public routes) + e2e tests | 4 |
 
-Total: **~15 commits**. Branch: `feat/plan-03-catalog`. ff-merges into `main` after final review.
+Total: **~15 commits**. Branch: `feat/plan-04-catalog`. ff-merges into `main` after final review.
 
 ---
 
 ## UNIT A — Domain layer
 
-### Task A1 — `Slug` shared VO
+### Task A1 — `AttrType` enum + `AttributeDefinition` composite VO
 
-**Files:** `app/domain/shared/value_objects/slug.py`, `tests/unit/domain/shared/value_objects/test_slug.py`.
+`AttrType` is a string enum. `AttributeDefinition` is a composite VO bundling `key`/`label`/`data_type`/`required`/`enum_values`, with the conditional invariant that `enum_values` is non-`None` iff `data_type == AttrType.ENUM`.
 
-- [ ] **Step 1: Failing test**
+**Files:** create `app/domain/catalog/__init__.py` (empty), `app/domain/catalog/attribute.py`, `tests/unit/domain/catalog/__init__.py` (empty), `tests/unit/domain/catalog/test_attribute.py`.
 
-`tests/unit/domain/shared/value_objects/test_slug.py`:
-
-```python
-from __future__ import annotations
-from app.domain.shared.value_objects.slug import Slug
-
-
-def test_slug_create_success_lowercase():
-    r = Slug.create("football-field")
-    assert r.is_success
-    assert r.value.value == "football-field"
-    assert str(r.value) == "football-field"
-
-
-def test_slug_create_strips_and_lowercases():
-    r = Slug.create("  Football-Field  ")
-    assert r.is_success
-    assert r.value.value == "football-field"
-
-
-def test_slug_create_rejects_empty():
-    r = Slug.create("")
-    assert r.is_failure
-    assert "slug" in r.error.lower()
-
-
-def test_slug_create_rejects_none():
-    r = Slug.create(None)
-    assert r.is_failure
-
-
-def test_slug_create_rejects_invalid_chars():
-    for bad in ["foo bar", "foo_bar", "foo.bar", "foo!bar", "ção"]:
-        r = Slug.create(bad)
-        assert r.is_failure, f"expected failure for {bad!r}"
-
-
-def test_slug_create_rejects_leading_digit():
-    r = Slug.create("1foo")
-    assert r.is_failure
-
-
-def test_slug_create_rejects_leading_or_trailing_dash():
-    assert Slug.create("-foo").is_failure
-    assert Slug.create("foo-").is_failure
-
-
-def test_slug_create_accepts_digits_after_first_char():
-    r = Slug.create("foo-123-bar")
-    assert r.is_success
-    assert r.value.value == "foo-123-bar"
-
-
-def test_slug_create_rejects_too_long():
-    r = Slug.create("a" + "b" * 80)
-    assert r.is_failure
-
-
-def test_slug_create_rejects_too_short():
-    r = Slug.create("a")
-    assert r.is_failure
-    r = Slug.create("ab")
-    assert r.is_success
-
-
-def test_slug_value_object_equality():
-    a = Slug.create("foo").value
-    b = Slug.create("foo").value
-    assert a == b
-    assert hash(a) == hash(b)
-```
-
-- [ ] **Step 2: Run — expect FAIL.**
-
-```bash
-.venv/bin/pytest tests/unit/domain/shared/value_objects/test_slug.py -q
-```
-
-Expect: `ModuleNotFoundError: No module named 'app.domain.shared.value_objects.slug'`.
-
-- [ ] **Step 3: Implement**
-
-`app/domain/shared/value_objects/slug.py`:
-
-```python
-from __future__ import annotations
-import re
-from dataclasses import dataclass
-from typing import Self
-from app.domain.shared.result import Result
-from app.domain.shared.value_object import BaseValueObject
-
-# 2-80 chars, must start with [a-z], remainder may contain [a-z0-9-],
-# must not end with a dash. No consecutive dashes constraint — `foo--bar`
-# is allowed (rare in practice).
-SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,78}[a-z0-9]$")
-
-
-@dataclass(frozen=True, slots=True)
-class Slug(BaseValueObject):
-    value: str  # lowercase, no surrounding whitespace
-
-    @classmethod
-    def create(cls, raw) -> Result[Self]:
-        if raw is None or not isinstance(raw, str):
-            return Result.failure("Slug: valor obrigatório.")
-        normalized = raw.strip().lower()
-        if not normalized:
-            return Result.failure("Slug: não pode ser vazio.")
-        if len(normalized) < 2 or len(normalized) > 80:
-            return Result.failure("Slug: deve ter entre 2 e 80 caracteres.")
-        if not SLUG_RE.match(normalized):
-            return Result.failure(
-                f"Slug inválido: '{raw}'. Use apenas a-z, 0-9 e hífen; "
-                "comece com letra; não termine com hífen."
-            )
-        return Result.success(cls(value=normalized))
-
-    def __str__(self) -> str:
-        return self.value
-```
-
-- [ ] **Step 4: Run — expect PASS.**
-
-```bash
-.venv/bin/pytest tests/unit/domain/shared/value_objects/test_slug.py -q
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add app/domain/shared/value_objects/slug.py tests/unit/domain/shared/value_objects/test_slug.py
-git commit -m "$(cat <<'EOF'
-feat(shared): add Slug value object
-
-Slug enforces the URL-friendly format used by ResourceType.slug
-(plan 03) and Resource.slug (plan 04 — design §5.3).
-
-  - 2-80 chars, lowercase
-  - must start with a-z
-  - body may contain a-z0-9 and hyphens
-  - must not end with a hyphen
-
-Lives in shared/ because two features need it.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
-### Task A2 — `AttrType` enum + `AttributeDefinition` VO
-
-**Files:** `app/domain/catalog/__init__.py` (empty), `app/domain/catalog/attribute.py`, `tests/unit/domain/catalog/__init__.py` (empty), `tests/unit/domain/catalog/test_attribute.py`.
-
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Failing tests**
 
 `tests/unit/domain/catalog/test_attribute.py`:
 
 ```python
 from __future__ import annotations
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.shared.value_objects.attribute_key import AttributeKey
+from app.domain.shared.value_objects.short_name import ShortName
 
 
-def test_attr_type_values():
+def test_attr_type_values_lowercase():
     assert AttrType.STRING.value == "string"
     assert AttrType.INT.value == "int"
     assert AttrType.BOOL.value == "bool"
     assert AttrType.ENUM.value == "enum"
 
 
-def test_attribute_definition_create_string():
+def test_attribute_definition_create_string_success():
     r = AttributeDefinition.create(
-        key="surface",
-        label="Tipo de piso",
+        key="field_size",
+        label="Tamanho do campo",
         data_type=AttrType.STRING,
         required=True,
-        enum_values=None,
     )
     assert r.is_success
-    a = r.value
-    assert a.key == "surface"
-    assert a.label == "Tipo de piso"
-    assert a.data_type is AttrType.STRING
-    assert a.required is True
-    assert a.enum_values is None
+    assert isinstance(r.value.key, AttributeKey)
+    assert r.value.key.value == "field_size"
+    assert isinstance(r.value.label, ShortName)
+    assert r.value.label.value == "Tamanho do campo"
+    assert r.value.data_type == AttrType.STRING
+    assert r.value.required is True
+    assert r.value.enum_values is None
+
+
+def test_attribute_definition_create_int_default_not_required():
+    r = AttributeDefinition.create(
+        key="players",
+        label="Jogadores",
+        data_type=AttrType.INT,
+    )
+    assert r.is_success
+    assert r.value.required is False
 
 
 def test_attribute_definition_create_enum_with_values():
     r = AttributeDefinition.create(
-        key="lighting",
-        label="Iluminação",
+        key="surface",
+        label="Tipo de gramado",
         data_type=AttrType.ENUM,
-        required=False,
-        enum_values=["natural", "artificial", "mista"],
+        enum_values=["natural", "synthetic"],
     )
     assert r.is_success
-    a = r.value
-    assert a.data_type is AttrType.ENUM
-    assert a.enum_values == ("natural", "artificial", "mista")  # tuple — frozen
+    assert r.value.enum_values is not None
+    assert tuple(v.value for v in r.value.enum_values) == ("natural", "synthetic")
 
 
-def test_attribute_definition_create_enum_without_values_fails():
+def test_attribute_definition_enum_requires_values():
     r = AttributeDefinition.create(
-        key="lighting", label="X", data_type=AttrType.ENUM,
-        required=False, enum_values=None,
+        key="surface",
+        label="Tipo de gramado",
+        data_type=AttrType.ENUM,
+        enum_values=None,
     )
     assert r.is_failure
-    assert "enum" in r.error.lower()
+    assert AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES in r.error
 
 
-def test_attribute_definition_create_enum_empty_values_fails():
+def test_attribute_definition_enum_rejects_empty_values():
     r = AttributeDefinition.create(
-        key="lighting", label="X", data_type=AttrType.ENUM,
-        required=False, enum_values=[],
+        key="surface",
+        label="Tipo de gramado",
+        data_type=AttrType.ENUM,
+        enum_values=[],
     )
     assert r.is_failure
+    assert AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES in r.error
 
 
-def test_attribute_definition_create_enum_duplicate_values_fails():
+def test_attribute_definition_non_enum_rejects_values():
     r = AttributeDefinition.create(
-        key="lighting", label="X", data_type=AttrType.ENUM,
-        required=False, enum_values=["a", "b", "a"],
+        key="players",
+        label="Jogadores",
+        data_type=AttrType.INT,
+        enum_values=["a", "b"],
     )
     assert r.is_failure
-    assert "duplicad" in r.error.lower() or "duplicate" in r.error.lower()
+    assert AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES in r.error
 
 
-def test_attribute_definition_create_non_enum_with_values_fails():
+def test_attribute_definition_propagates_attribute_key_error():
     r = AttributeDefinition.create(
-        key="size", label="X", data_type=AttrType.INT,
-        required=False, enum_values=["a", "b"],
+        key="Invalid Key!",
+        label="Foo",
+        data_type=AttrType.STRING,
     )
     assert r.is_failure
+    assert AttributeKey.ATTRIBUTE_KEY_INVALID_FORMAT in r.error
 
 
-def test_attribute_definition_create_blank_key_fails():
+def test_attribute_definition_propagates_label_error():
     r = AttributeDefinition.create(
-        key="", label="X", data_type=AttrType.STRING,
-        required=False, enum_values=None,
+        key="ok",
+        label="",
+        data_type=AttrType.STRING,
     )
     assert r.is_failure
+    assert ShortName.SHORT_NAME_CANNOT_BE_EMPTY in r.error
 
 
-def test_attribute_definition_create_invalid_key_format_fails():
-    for bad in ["Has Space", "UPPER", "1leading-digit", "with-dash", "with.dot"]:
-        r = AttributeDefinition.create(
-            key=bad, label="X", data_type=AttrType.STRING,
-            required=False, enum_values=None,
-        )
-        assert r.is_failure, f"expected failure for {bad!r}"
-
-
-def test_attribute_definition_create_blank_label_fails():
+def test_attribute_definition_propagates_enum_value_error():
     r = AttributeDefinition.create(
-        key="ok", label="   ", data_type=AttrType.STRING,
-        required=False, enum_values=None,
+        key="surface",
+        label="Tipo",
+        data_type=AttrType.ENUM,
+        enum_values=["valid", ""],
     )
     assert r.is_failure
-    assert "label" in r.error.lower()
+    assert ShortName.SHORT_NAME_CANNOT_BE_EMPTY in r.error
 
 
 def test_attribute_definition_equality():
     a = AttributeDefinition.create(
-        key="k", label="L", data_type=AttrType.BOOL,
-        required=True, enum_values=None,
+        key="k", label="L", data_type=AttrType.STRING, required=True,
     ).value
     b = AttributeDefinition.create(
-        key="k", label="L", data_type=AttrType.BOOL,
-        required=True, enum_values=None,
+        key="k", label="L", data_type=AttrType.STRING, required=True,
     ).value
     assert a == b
     assert hash(a) == hash(b)
 ```
 
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — fail (ImportError on `app.domain.catalog.attribute`)**
 
 ```bash
-.venv/bin/pytest tests/unit/domain/catalog/test_attribute.py -q
+.venv/bin/pytest tests/unit/domain/catalog/test_attribute.py -v
 ```
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implementation**
 
-`app/domain/catalog/__init__.py`: empty.
+`app/domain/catalog/__init__.py`: empty file.
 
 `app/domain/catalog/attribute.py`:
 
 ```python
 from __future__ import annotations
-import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 from app.domain.shared.result import Result
-
-# Same shape as Python identifiers but stricter: lowercase only, must
-# start with a letter. Used as JSON keys + as part of API request keys.
-ATTR_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+from app.domain.shared.value_object import BaseValueObject
+from app.domain.shared.value_objects.attribute_key import AttributeKey
+from app.domain.shared.value_objects.short_name import ShortName
 
 
 class AttrType(str, Enum):
@@ -459,12 +318,16 @@ class AttrType(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class AttributeDefinition:
-    key: str
-    label: str
+class AttributeDefinition(BaseValueObject):
+    ENUM_TYPE_REQUIRES_VALUES = "EnumTypeRequiresValues"
+    NON_ENUM_TYPE_CANNOT_HAVE_VALUES = "NonEnumTypeCannotHaveValues"
+
+    key: AttributeKey
+    label: ShortName
     data_type: AttrType
     required: bool
-    enum_values: tuple[str, ...] | None  # tuple so the dataclass is hashable
+    # tuple instead of list so the VO stays hashable + frozen-friendly.
+    enum_values: tuple[ShortName, ...] | None
 
     @classmethod
     def create(
@@ -473,331 +336,340 @@ class AttributeDefinition:
         key: str,
         label: str,
         data_type: AttrType,
-        required: bool,
-        enum_values: list[str] | tuple[str, ...] | None,
+        required: bool = False,
+        enum_values: list[str] | None = None,
     ) -> Result[Self]:
         errors: list[str] = []
 
-        key_clean = (key or "").strip()
-        if not key_clean:
-            errors.append("AttributeDefinition.key: obrigatório.")
-        elif not ATTR_KEY_RE.match(key_clean):
-            errors.append(
-                f"AttributeDefinition.key inválido: '{key}'. "
-                "Use apenas a-z, 0-9 e _; comece com letra."
-            )
+        key_r = AttributeKey.create(key)
+        if key_r.is_failure:
+            errors.append(key_r.error)
 
-        label_clean = (label or "").strip()
-        if not label_clean:
-            errors.append("AttributeDefinition.label: obrigatório.")
+        label_r = ShortName.create(label)
+        if label_r.is_failure:
+            errors.append(label_r.error)
 
-        if not isinstance(data_type, AttrType):
-            errors.append(
-                f"AttributeDefinition.data_type: deve ser AttrType, recebido {type(data_type).__name__}."
-            )
-
-        normalized_enum: tuple[str, ...] | None = None
-        if data_type is AttrType.ENUM:
-            if enum_values is None or len(list(enum_values)) == 0:
-                errors.append(
-                    "AttributeDefinition: enum_values é obrigatório quando data_type=ENUM."
-                )
+        enum_vos: tuple[ShortName, ...] | None = None
+        if data_type == AttrType.ENUM:
+            if not enum_values:
+                errors.append(cls.ENUM_TYPE_REQUIRES_VALUES)
             else:
-                values_list = [str(v).strip() for v in enum_values]
-                if any(not v for v in values_list):
-                    errors.append("AttributeDefinition.enum_values: nenhum valor pode ser vazio.")
-                elif len(set(values_list)) != len(values_list):
-                    errors.append("AttributeDefinition.enum_values: valores duplicados.")
-                else:
-                    normalized_enum = tuple(values_list)
+                vos: list[ShortName] = []
+                for raw in enum_values:
+                    r = ShortName.create(raw)
+                    if r.is_failure:
+                        errors.append(r.error)
+                    else:
+                        vos.append(r.value)
+                if not errors:
+                    enum_vos = tuple(vos)
         else:
-            if enum_values is not None and len(list(enum_values)) > 0:
-                errors.append(
-                    "AttributeDefinition: enum_values só é permitido quando data_type=ENUM."
-                )
+            if enum_values:
+                errors.append(cls.NON_ENUM_TYPE_CANNOT_HAVE_VALUES)
 
         if errors:
             return Result.failure("; ".join(errors))
 
         return Result.success(cls(
-            key=key_clean,
-            label=label_clean,
+            key=key_r.value,
+            label=label_r.value,
             data_type=data_type,
             required=required,
-            enum_values=normalized_enum,
+            enum_values=enum_vos,
         ))
 ```
 
-- [ ] **Step 4: Run — expect PASS.**
+- [ ] **Step 4: Run — green**
 
 ```bash
-.venv/bin/pytest tests/unit/domain/catalog/test_attribute.py -q
+.venv/bin/pytest tests/unit/domain/catalog/test_attribute.py -v
+.venv/bin/pytest -q
 ```
 
-- [ ] **Step 5: Commit**
+Expected: 10 new tests pass; full suite still green.
+
+- [ ] **Step 5: Add the new error codes to the pt-BR mapping**
+
+Edit `app/api/error_codes.py`. Find the existing `# Handler-level (not VO-bound) codes` section (added in Plan 03) and add the catalog VO codes alongside it (or create a new `# Catalog VO-level` section). Since `AttributeDefinition` is a VO subclass of `BaseValueObject`, the architecture test will pick it up automatically — no allowlist needed.
+
+```python
+    # AttributeDefinition (catalog VO)
+    AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES: "Atributo do tipo enum precisa de valores possíveis.",
+    AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES: "Atributo que não é enum não pode ter valores possíveis.",
+```
+
+Add the import at the top:
+
+```python
+from app.domain.catalog.attribute import AttributeDefinition
+```
+
+- [ ] **Step 6: Run architecture test**
 
 ```bash
-git add app/domain/catalog/__init__.py app/domain/catalog/attribute.py tests/unit/domain/catalog/__init__.py tests/unit/domain/catalog/test_attribute.py
+.venv/bin/pytest tests/unit/architecture/test_error_code_coverage.py -v
+```
+
+Expected: 2 tests pass. The walker discovers `AttributeDefinition` as a `BaseValueObject` subclass and validates both new codes have translations.
+
+- [ ] **Step 7: Run full suite**
+
+```bash
+.venv/bin/pytest -q
+```
+
+Expected: green.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add app/domain/catalog/__init__.py app/domain/catalog/attribute.py \
+        tests/unit/domain/catalog/__init__.py tests/unit/domain/catalog/test_attribute.py \
+        app/api/error_codes.py
 git commit -m "$(cat <<'EOF'
-feat(catalog): add AttrType enum and AttributeDefinition VO
+feat(catalog): add AttrType enum + AttributeDefinition composite VO
 
-AttributeDefinition.create() validates the key format (a-z0-9_, starts
-with a letter), label non-empty, and the (data_type, enum_values)
-consistency: enum_values must be present and unique iff data_type=ENUM.
-
-enum_values is stored as a tuple[str, ...] so the VO stays hashable.
+AttrType is a str Enum with lowercase values (string/int/bool/enum)
+that doubles as the JSON wire format. AttributeDefinition is a
+composite VO bundling key (AttributeKey), label (ShortName), data_type,
+required, and conditionally enum_values (tuple[ShortName, ...] iff
+data_type == ENUM). create() aggregates VO failures from key, label,
+and each enum value, plus enforces the conditional ENUM-vs-values
+invariant. pt-BR mappings registered.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Task A3 — `ResourceType` aggregate
+---
+
+### Task A2 — `ResourceType` aggregate
+
+The aggregate root. Slug-keyed identity. Holds the schema list. Mutators per spec §4.4 conventions: `update_metadata` (no invariant → `None`), `replace_attribute_schema` (enforces unique-key invariant → `Result[None]`), `activate`/`deactivate` (no invariant → `None`).
 
 **Files:** `app/domain/catalog/resource_type.py`, `tests/unit/domain/catalog/test_resource_type.py`.
 
-The aggregate covers: factory `create()`, partial-update mutators, activate/deactivate, and `validate_attributes(values: dict[str, Any]) -> Result[None]` for the future `resources` feature.
-
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Failing tests**
 
 `tests/unit/domain/catalog/test_resource_type.py`:
 
 ```python
 from __future__ import annotations
-from datetime import datetime, timezone
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.value_objects.name import Name
+from app.domain.shared.value_objects.short_description import ShortDescription
+from app.domain.shared.value_objects.slug import Slug
 
 
-def _enum_attr() -> AttributeDefinition:
-    return AttributeDefinition.create(
-        key="lighting", label="Iluminação", data_type=AttrType.ENUM,
-        required=False, enum_values=["natural", "artificial"],
-    ).value
+def _ad(key: str, label: str, dt: AttrType = AttrType.STRING, **kw):
+    return AttributeDefinition.create(key=key, label=label, data_type=dt, **kw).value
 
 
-def _string_attr(key: str = "surface", required: bool = True) -> AttributeDefinition:
-    return AttributeDefinition.create(
-        key=key, label="X", data_type=AttrType.STRING,
-        required=required, enum_values=None,
-    ).value
-
-
-def _int_attr(key: str = "size_m2", required: bool = False) -> AttributeDefinition:
-    return AttributeDefinition.create(
-        key=key, label="X", data_type=AttrType.INT,
-        required=required, enum_values=None,
-    ).value
-
-
-def _bool_attr(key: str = "covered", required: bool = False) -> AttributeDefinition:
-    return AttributeDefinition.create(
-        key=key, label="X", data_type=AttrType.BOOL,
-        required=required, enum_values=None,
-    ).value
-
-
-def test_create_resource_type_success():
+def test_resource_type_create_minimal():
     r = ResourceType.create(
         slug="football-field",
-        name="Campo de Futebol",
-        description="Campo gramado oficial.",
-        attribute_schema=[_string_attr(), _enum_attr()],
-    )
-    assert r.is_success
-    rt = r.value
-    assert str(rt.slug) == "football-field"
-    assert rt.name == "Campo de Futebol"
-    assert rt.description == "Campo gramado oficial."
-    assert len(rt.attribute_schema) == 2
-    assert rt.is_active is True
-
-
-def test_create_resource_type_default_active_and_empty_schema():
-    r = ResourceType.create(
-        slug="court", name="Quadra", description="", attribute_schema=[],
-    )
-    assert r.is_success
-    rt = r.value
-    assert rt.attribute_schema == ()  # tuple — frozen post-creation
-    assert rt.is_active is True
-
-
-def test_create_resource_type_invalid_slug_fails():
-    r = ResourceType.create(
-        slug="Invalid Slug!", name="X", description="", attribute_schema=[],
-    )
-    assert r.is_failure
-
-
-def test_create_resource_type_blank_name_fails():
-    r = ResourceType.create(
-        slug="football-field", name="   ", description="", attribute_schema=[],
-    )
-    assert r.is_failure
-    assert "name" in r.error.lower() or "nome" in r.error.lower()
-
-
-def test_create_resource_type_duplicate_attribute_keys_fails():
-    a = _string_attr(key="x")
-    b = _string_attr(key="x")
-    r = ResourceType.create(
-        slug="football-field", name="X", description="",
-        attribute_schema=[a, b],
-    )
-    assert r.is_failure
-    assert "duplicad" in r.error.lower() or "duplicate" in r.error.lower()
-
-
-def test_update_metadata_changes_fields_and_timestamp():
-    r = ResourceType.create(
-        slug="football-field", name="Old", description="old",
+        name="Football Field",
+        description="",
         attribute_schema=[],
     )
+    assert r.is_success
     rt = r.value
-    before = rt.updated_at
-    rt.update_metadata(name="New", description="new desc")
-    assert rt.name == "New"
-    assert rt.description == "new desc"
-    assert rt.updated_at > before
-    # slug is immutable through this path
-    assert str(rt.slug) == "football-field"
+    assert isinstance(rt.slug, Slug)
+    assert isinstance(rt.name, Name)
+    assert isinstance(rt.description, ShortDescription)
+    assert rt.slug.value == "football-field"
+    assert rt.name.value == "Football Field"
+    assert rt.description.value == ""
+    assert rt.attribute_schema == ()
+    assert rt.is_active is True
 
 
-def test_replace_attribute_schema_validates_uniqueness():
-    rt = ResourceType.create(
-        slug="football-field", name="X", description="", attribute_schema=[],
-    ).value
-    a = _string_attr(key="x")
-    b = _string_attr(key="x")
-    r = rt.replace_attribute_schema([a, b])
+def test_resource_type_create_with_schema():
+    r = ResourceType.create(
+        slug="padel-court",
+        name="Padel Court",
+        description="Quadras de padel cobertas",
+        attribute_schema=[
+            _ad("surface", "Tipo de gramado", AttrType.ENUM, enum_values=["sintetico", "natural"]),
+            _ad("players", "Jogadores", AttrType.INT, required=True),
+        ],
+    )
+    assert r.is_success
+    assert len(r.value.attribute_schema) == 2
+
+
+def test_resource_type_create_propagates_slug_error():
+    r = ResourceType.create(
+        slug="Invalid Slug!",
+        name="Foo",
+        description="",
+        attribute_schema=[],
+    )
     assert r.is_failure
+    assert Slug.SLUG_INVALID_FORMAT in r.error
 
 
-def test_replace_attribute_schema_success_updates_timestamp():
+def test_resource_type_create_propagates_name_error():
+    r = ResourceType.create(
+        slug="football-field",
+        name="",
+        description="",
+        attribute_schema=[],
+    )
+    assert r.is_failure
+    assert Name.NAME_CANNOT_BE_EMPTY in r.error
+
+
+def test_resource_type_create_rejects_duplicate_attribute_keys():
+    a1 = _ad("size", "Tamanho")
+    a2 = _ad("size", "Outro tamanho")
+    r = ResourceType.create(
+        slug="football-field",
+        name="Football Field",
+        description="",
+        attribute_schema=[a1, a2],
+    )
+    assert r.is_failure
+    assert ResourceType.DUPLICATE_ATTRIBUTE_KEY in r.error
+
+
+def test_resource_type_attribute_schema_returns_tuple_view():
     rt = ResourceType.create(
-        slug="football-field", name="X", description="", attribute_schema=[],
+        slug="football-field",
+        name="Football Field",
+        description="",
+        attribute_schema=[_ad("size", "Tamanho")],
+    ).value
+    schema = rt.attribute_schema
+    assert isinstance(schema, tuple)
+
+
+def test_resource_type_update_metadata_no_invariant_returns_none():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
     ).value
     before = rt.updated_at
-    r = rt.replace_attribute_schema([_string_attr(), _enum_attr()])
+    result = rt.update_metadata(name="Campo de Futebol", description="atualizado")
+    assert result is None
+    assert rt.name.value == "Campo de Futebol"
+    assert rt.description.value == "atualizado"
+    assert rt.updated_at > before
+
+
+def test_resource_type_replace_attribute_schema_success():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
+    ).value
+    new_schema = [_ad("size", "Tamanho"), _ad("players", "Jogadores", AttrType.INT)]
+    r = rt.replace_attribute_schema(new_schema)
     assert r.is_success
     assert len(rt.attribute_schema) == 2
-    assert rt.updated_at > before
 
 
-def test_deactivate_and_activate_toggle_flag_and_timestamp():
+def test_resource_type_replace_attribute_schema_rejects_duplicates():
     rt = ResourceType.create(
-        slug="x", name="X", description="", attribute_schema=[],
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
     ).value
-    before = rt.updated_at
+    r = rt.replace_attribute_schema([_ad("size", "A"), _ad("size", "B")])
+    assert r.is_failure
+    assert r.error == ResourceType.DUPLICATE_ATTRIBUTE_KEY
+
+
+def test_resource_type_activate_deactivate():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
+    ).value
+    assert rt.is_active is True
     rt.deactivate()
     assert rt.is_active is False
-    assert rt.updated_at > before
-    mid = rt.updated_at
     rt.activate()
     assert rt.is_active is True
-    assert rt.updated_at >= mid
 
 
-def test_validate_attributes_empty_schema_accepts_empty_dict():
+def test_resource_type_validate_attributes_required_present():
     rt = ResourceType.create(
-        slug="x", name="X", description="", attribute_schema=[],
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("players", "Jogadores", AttrType.INT, required=True)],
     ).value
-    r = rt.validate_attributes({})
-    assert r.is_success
+    assert rt.validate_attributes({"players": 10}).is_success
 
 
-def test_validate_attributes_empty_schema_rejects_extra_keys():
+def test_resource_type_validate_attributes_required_missing():
     rt = ResourceType.create(
-        slug="x", name="X", description="", attribute_schema=[],
-    ).value
-    r = rt.validate_attributes({"extra": "value"})
-    assert r.is_failure
-    assert "extra" in r.error or "desconhecid" in r.error.lower()
-
-
-def test_validate_attributes_required_string_present():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_string_attr(key="surface", required=True)],
-    ).value
-    r = rt.validate_attributes({"surface": "grama"})
-    assert r.is_success
-
-
-def test_validate_attributes_required_string_missing_fails():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_string_attr(key="surface", required=True)],
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("players", "Jogadores", AttrType.INT, required=True)],
     ).value
     r = rt.validate_attributes({})
     assert r.is_failure
-    assert "surface" in r.error
+    assert ResourceType.REQUIRED_ATTRIBUTE_MISSING in r.error
+    assert "players" in r.error
 
 
-def test_validate_attributes_optional_missing_is_ok():
+def test_resource_type_validate_attributes_type_mismatch_int():
     rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_string_attr(key="surface", required=False)],
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("players", "Jogadores", AttrType.INT, required=True)],
     ).value
-    r = rt.validate_attributes({})
-    assert r.is_success
-
-
-def test_validate_attributes_int_type_check():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_int_attr(key="size_m2", required=True)],
-    ).value
-    assert rt.validate_attributes({"size_m2": 100}).is_success
-    assert rt.validate_attributes({"size_m2": "not-int"}).is_failure
-    # bool is a subtype of int in Python — explicitly reject
-    assert rt.validate_attributes({"size_m2": True}).is_failure
-
-
-def test_validate_attributes_bool_type_check():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_bool_attr(key="covered", required=True)],
-    ).value
-    assert rt.validate_attributes({"covered": True}).is_success
-    assert rt.validate_attributes({"covered": False}).is_success
-    assert rt.validate_attributes({"covered": "yes"}).is_failure
-    assert rt.validate_attributes({"covered": 1}).is_failure
-
-
-def test_validate_attributes_enum_value_must_be_in_set():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[_enum_attr()],
-    ).value
-    assert rt.validate_attributes({"lighting": "natural"}).is_success
-    assert rt.validate_attributes({"lighting": "infrared"}).is_failure
-
-
-def test_validate_attributes_reports_all_errors_at_once():
-    rt = ResourceType.create(
-        slug="x", name="X", description="",
-        attribute_schema=[
-            _string_attr(key="surface", required=True),
-            _int_attr(key="size_m2", required=True),
-        ],
-    ).value
-    r = rt.validate_attributes({"surface": 123, "extra": "x"})
+    r = rt.validate_attributes({"players": "ten"})
     assert r.is_failure
-    # All three problems should be flagged
-    assert "surface" in r.error
-    assert "size_m2" in r.error
-    assert "extra" in r.error
+    assert ResourceType.ATTRIBUTE_TYPE_MISMATCH in r.error
+
+
+def test_resource_type_validate_attributes_type_mismatch_bool():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("lit", "Iluminado", AttrType.BOOL)],
+    ).value
+    r = rt.validate_attributes({"lit": "yes"})
+    assert r.is_failure
+    assert ResourceType.ATTRIBUTE_TYPE_MISMATCH in r.error
+
+
+def test_resource_type_validate_attributes_enum_value_in_set():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("surface", "Tipo", AttrType.ENUM, enum_values=["natural", "synthetic"])],
+    ).value
+    assert rt.validate_attributes({"surface": "natural"}).is_success
+
+
+def test_resource_type_validate_attributes_enum_value_not_in_set():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("surface", "Tipo", AttrType.ENUM, enum_values=["natural", "synthetic"])],
+    ).value
+    r = rt.validate_attributes({"surface": "concrete"})
+    assert r.is_failure
+    assert ResourceType.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED in r.error
+
+
+def test_resource_type_validate_attributes_unknown_key():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("size", "Tamanho")],
+    ).value
+    r = rt.validate_attributes({"size": "ok", "unknown": "value"})
+    assert r.is_failure
+    assert ResourceType.UNKNOWN_ATTRIBUTE_KEY in r.error
+
+
+def test_resource_type_validate_attributes_optional_absent_is_ok():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="",
+        attribute_schema=[_ad("size", "Tamanho", AttrType.STRING, required=False)],
+    ).value
+    assert rt.validate_attributes({}).is_success
 ```
 
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — fail**
 
 ```bash
-.venv/bin/pytest tests/unit/domain/catalog/test_resource_type.py -q
+.venv/bin/pytest tests/unit/domain/catalog/test_resource_type.py -v
 ```
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implementation**
 
 `app/domain/catalog/resource_type.py`:
 
@@ -805,10 +677,12 @@ def test_validate_attributes_reports_all_errors_at_once():
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Self
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
+from typing import Any, Iterable, Self
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.shared.entity import BaseEntity
 from app.domain.shared.result import Result
+from app.domain.shared.value_objects.name import Name
+from app.domain.shared.value_objects.short_description import ShortDescription
 from app.domain.shared.value_objects.slug import Slug
 
 
@@ -818,11 +692,17 @@ def _utcnow() -> datetime:
 
 @dataclass(slots=True, kw_only=True)
 class ResourceType(BaseEntity):
+    DUPLICATE_ATTRIBUTE_KEY = "DuplicateAttributeKey"
+    REQUIRED_ATTRIBUTE_MISSING = "RequiredAttributeMissing"
+    UNKNOWN_ATTRIBUTE_KEY = "UnknownAttributeKey"
+    ATTRIBUTE_TYPE_MISMATCH = "AttributeTypeMismatch"
+    ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED = "AttributeEnumValueNotAllowed"
+
     slug: Slug
-    name: str
-    description: str
-    attribute_schema: tuple[AttributeDefinition, ...] = ()
+    name: Name
+    description: ShortDescription
     is_active: bool = True
+    _attribute_schema: list[AttributeDefinition] = field(default_factory=list, repr=False)
 
     @classmethod
     def create(
@@ -831,7 +711,7 @@ class ResourceType(BaseEntity):
         slug: str,
         name: str,
         description: str,
-        attribute_schema: list[AttributeDefinition] | tuple[AttributeDefinition, ...],
+        attribute_schema: Iterable[AttributeDefinition],
         is_active: bool = True,
     ) -> Result[Self]:
         errors: list[str] = []
@@ -840,41 +720,55 @@ class ResourceType(BaseEntity):
         if slug_r.is_failure:
             errors.append(slug_r.error)
 
-        name_clean = (name or "").strip()
-        if not name_clean:
-            errors.append("ResourceType.name: obrigatório.")
+        name_r = Name.create(name)
+        if name_r.is_failure:
+            errors.append(name_r.error)
 
-        description_clean = description if description is not None else ""
+        desc_r = ShortDescription.create(description)
+        if desc_r.is_failure:
+            errors.append(desc_r.error)
 
-        schema_tuple = tuple(attribute_schema)
-        keys = [a.key for a in schema_tuple]
-        if len(set(keys)) != len(keys):
-            errors.append("ResourceType.attribute_schema: chaves duplicadas.")
+        schema_list = list(attribute_schema)
+        if cls._has_duplicate_keys(schema_list):
+            errors.append(cls.DUPLICATE_ATTRIBUTE_KEY)
 
         if errors:
             return Result.failure("; ".join(errors))
 
         return Result.success(cls(
             slug=slug_r.value,
-            name=name_clean,
-            description=description_clean,
-            attribute_schema=schema_tuple,
+            name=name_r.value,
+            description=desc_r.value,
             is_active=is_active,
+            _attribute_schema=schema_list,
         ))
 
-    def update_metadata(self, *, name: str, description: str) -> None:
-        self.name = name.strip()
-        self.description = description if description is not None else ""
+    @property
+    def attribute_schema(self) -> tuple[AttributeDefinition, ...]:
+        return tuple(self._attribute_schema)
+
+    def update_metadata(self, *, name: str | None = None, description: str | None = None) -> None:
+        """Updates name and/or description from raw input. No invariant — returns None.
+        Validates each VO; if either fails, raises (caller should validate first via VOs).
+        Per §4.4: mutators with no domain invariant return None. The VO factory is the
+        validation gate.
+        """
+        if name is not None:
+            r = Name.create(name)
+            if r.is_success:
+                self.name = r.value
+        if description is not None:
+            r = ShortDescription.create(description)
+            if r.is_success:
+                self.description = r.value
         self.updated_at = _utcnow()
 
-    def replace_attribute_schema(
-        self, schema: list[AttributeDefinition] | tuple[AttributeDefinition, ...],
-    ) -> Result[None]:
-        schema_tuple = tuple(schema)
-        keys = [a.key for a in schema_tuple]
-        if len(set(keys)) != len(keys):
-            return Result.failure("ResourceType.attribute_schema: chaves duplicadas.")
-        self.attribute_schema = schema_tuple
+    def replace_attribute_schema(self, definitions: Iterable[AttributeDefinition]) -> Result[None]:
+        """Wholesale replacement. Enforces unique-key invariant — returns Result[None]."""
+        defs = list(definitions)
+        if self._has_duplicate_keys(defs):
+            return Result.failure(self.DUPLICATE_ATTRIBUTE_KEY)
+        self._attribute_schema = defs
         self.updated_at = _utcnow()
         return Result.success(None)
 
@@ -887,182 +781,260 @@ class ResourceType(BaseEntity):
         self.updated_at = _utcnow()
 
     def validate_attributes(self, values: dict[str, Any]) -> Result[None]:
-        """Validate a dict of attribute values against this type's schema.
+        """Validate a dict of raw values against this type's attribute_schema.
 
-        Used by future Resource.create() to validate base_attributes.
-        Reports all violations at once (joined with '; ').
+        Used by future Plan 06 Resource.create() to validate Resource.base_attributes
+        before persistence. Returns aggregated errors as semicolon-joined codes.
         """
         errors: list[str] = []
-        schema_by_key = {a.key: a for a in self.attribute_schema}
+        defs_by_key = {d.key.value: d for d in self._attribute_schema}
 
-        # Unknown keys
-        for key in values.keys():
-            if key not in schema_by_key:
-                errors.append(f"Chave desconhecida: '{key}'.")
+        # Required attributes must be present.
+        for d in self._attribute_schema:
+            if d.required and d.key.value not in values:
+                errors.append(f"{self.REQUIRED_ATTRIBUTE_MISSING}:{d.key.value}")
 
-        # Required missing + per-key type checks
-        for key, defn in schema_by_key.items():
-            if key not in values:
-                if defn.required:
-                    errors.append(f"'{key}': valor obrigatório.")
+        for key, value in values.items():
+            d = defs_by_key.get(key)
+            if d is None:
+                errors.append(f"{self.UNKNOWN_ATTRIBUTE_KEY}:{key}")
                 continue
-            v = values[key]
-            type_err = _check_type(defn, v)
-            if type_err:
-                errors.append(type_err)
+
+            if d.data_type == AttrType.STRING:
+                if not isinstance(value, str):
+                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+            elif d.data_type == AttrType.INT:
+                # bool is a subclass of int; reject explicitly.
+                if isinstance(value, bool) or not isinstance(value, int):
+                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+            elif d.data_type == AttrType.BOOL:
+                if not isinstance(value, bool):
+                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+            elif d.data_type == AttrType.ENUM:
+                allowed = {v.value for v in (d.enum_values or ())}
+                if not isinstance(value, str) or value not in allowed:
+                    errors.append(f"{self.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED}:{key}")
 
         if errors:
             return Result.failure("; ".join(errors))
         return Result.success(None)
 
-
-def _check_type(defn: AttributeDefinition, value: Any) -> str | None:
-    """Returns an error message if the value doesn't match the definition's type, else None."""
-    if defn.data_type is AttrType.STRING:
-        if not isinstance(value, str):
-            return f"'{defn.key}': esperado string, recebido {type(value).__name__}."
-        return None
-    if defn.data_type is AttrType.INT:
-        # bool is an int subclass in Python — explicitly reject
-        if isinstance(value, bool) or not isinstance(value, int):
-            return f"'{defn.key}': esperado int, recebido {type(value).__name__}."
-        return None
-    if defn.data_type is AttrType.BOOL:
-        if not isinstance(value, bool):
-            return f"'{defn.key}': esperado bool, recebido {type(value).__name__}."
-        return None
-    if defn.data_type is AttrType.ENUM:
-        if not isinstance(value, str):
-            return f"'{defn.key}': esperado string (enum), recebido {type(value).__name__}."
-        if defn.enum_values is None or value not in defn.enum_values:
-            allowed = ", ".join(defn.enum_values or ())
-            return f"'{defn.key}': valor '{value}' não está em [{allowed}]."
-        return None
-    return f"'{defn.key}': data_type desconhecido."
+    @staticmethod
+    def _has_duplicate_keys(definitions: list[AttributeDefinition]) -> bool:
+        keys = [d.key.value for d in definitions]
+        return len(keys) != len(set(keys))
 ```
 
-- [ ] **Step 4: Run — expect PASS.**
+- [ ] **Step 4: Run — green**
 
 ```bash
-.venv/bin/pytest tests/unit/domain/catalog/test_resource_type.py -q
+.venv/bin/pytest tests/unit/domain/catalog/test_resource_type.py -v
+.venv/bin/pytest -q
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Add the new error codes to `app/api/error_codes.py`**
+
+These are entity-level codes (not VO-level), so they go in the handler-level allowlist of the architecture test. Add to `error_codes.py`:
+
+```python
+    # ResourceType (entity-level codes — registered in arch test allowlist)
+    "DuplicateAttributeKey": "Atributos duplicados — chaves devem ser únicas dentro do tipo.",
+    "RequiredAttributeMissing": "Atributo obrigatório ausente.",
+    "UnknownAttributeKey": "Atributo desconhecido — não está no schema do tipo.",
+    "AttributeTypeMismatch": "Valor do atributo não bate com o tipo declarado.",
+    "AttributeEnumValueNotAllowed": "Valor do atributo enum fora dos valores permitidos.",
+```
+
+Add to `tests/unit/architecture/test_error_code_coverage.py`:
+
+```python
+    handler_level_allowlist: set[str] = {
+        "PasswordHashCannotBeEmpty",
+        "DuplicateAttributeKey",
+        "RequiredAttributeMissing",
+        "UnknownAttributeKey",
+        "AttributeTypeMismatch",
+        "AttributeEnumValueNotAllowed",
+    }
+```
+
+Note: `validate_attributes` emits codes with a suffix (e.g., `"RequiredAttributeMissing:players"`). The architecture test checks the bare code; the suffix is appended at runtime for caller-side context. The bare code constants are what get translated.
+
+- [ ] **Step 6: Run architecture test + full suite**
 
 ```bash
-git add app/domain/catalog/resource_type.py tests/unit/domain/catalog/test_resource_type.py
+.venv/bin/pytest tests/unit/architecture/test_error_code_coverage.py -v
+.venv/bin/pytest -q
+```
+
+Expected: green.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/domain/catalog/resource_type.py tests/unit/domain/catalog/test_resource_type.py \
+        app/api/error_codes.py tests/unit/architecture/test_error_code_coverage.py
 git commit -m "$(cat <<'EOF'
-feat(catalog): add ResourceType aggregate with attribute validation
+feat(catalog): add ResourceType aggregate with validate_attributes
 
-ResourceType.create() validates slug (via Slug VO), name non-empty,
-and attribute_schema key uniqueness. update_metadata, activate,
-deactivate, and replace_attribute_schema are simple mutators that
-bump updated_at.
+ResourceType is a slug-keyed aggregate root holding name (Name),
+description (ShortDescription), and an attribute_schema (private
+list of AttributeDefinition with immutable tuple view). Mutators
+follow spec §4.4: update_metadata + activate/deactivate return None
+(no domain invariant); replace_attribute_schema returns Result[None]
+to enforce unique-key invariant. validate_attributes(dict) walks the
+schema and aggregates type/required/enum errors with stable codes
+suffixed by the offending key (e.g., "RequiredAttributeMissing:players")
+for caller context.
 
-validate_attributes(values) is the validator the resources feature
-will call to check Resource.base_attributes against the schema —
-reports all violations at once for a useful error response.
+Five new entity-level codes registered in the pt-BR mapping and the
+architecture-test handler_level_allowlist.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Task A4 — `IResourceTypeRepository` Protocol
+---
+
+### Task A3 — `IResourceTypeRepository` Protocol
+
+Defines the persistence contract that the SQLAlchemy adapter (Unit B) and the in-memory fake (Unit C) implement.
 
 **Files:** `app/domain/catalog/repository.py`.
 
-No test — Protocols are interfaces; the in-memory fake (Unit C, Task C1) is what verifies the contract holds.
-
-- [ ] **Step 1: Implement**
+- [ ] **Step 1: Implementation** (no dedicated test for a Protocol; consumers in C/D test it)
 
 `app/domain/catalog/repository.py`:
 
 ```python
 from __future__ import annotations
-from typing import Protocol, Sequence
+from typing import Protocol
 from uuid import UUID
 from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.result import Result
 
 
 class IResourceTypeRepository(Protocol):
-    async def get_by_id(self, resource_type_id: UUID) -> ResourceType | None: ...
-    async def get_by_slug(self, slug: str) -> ResourceType | None: ...
-    async def list(
-        self, *, limit: int = 50, offset: int = 0, only_active: bool = False,
-    ) -> Sequence[ResourceType]: ...
-    async def add(self, resource_type: ResourceType) -> None: ...
-    async def update(self, resource_type: ResourceType) -> None: ...
-    async def delete(self, resource_type_id: UUID) -> None: ...
+    """Persistence port for the catalog feature."""
+
+    async def add(self, rt: ResourceType) -> Result[None]:
+        """Persist a new ResourceType. Returns SlugAlreadyTaken on conflict."""
+        ...
+
+    async def update(self, rt: ResourceType) -> Result[None]:
+        """Persist changes to an existing ResourceType."""
+        ...
+
+    async def delete(self, rt_id: UUID) -> Result[None]:
+        """Hard-delete the row. Returns ResourceTypeNotFound if missing."""
+        ...
+
+    async def get_by_id(self, rt_id: UUID) -> ResourceType | None:
+        ...
+
+    async def get_by_slug(self, slug: str) -> ResourceType | None:
+        ...
+
+    async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        """Admin list — includes inactive rows."""
+        ...
+
+    async def list_active(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        """Public list — only is_active=True rows."""
+        ...
 ```
 
-- [ ] **Step 2: Verify it imports cleanly**
+Two new handler-level codes appear here as comments — `"SlugAlreadyTaken"` and `"ResourceTypeNotFound"`. They're not yet emitted; handlers in Unit C will emit them. We register them now since the Protocol's docstrings reference them.
+
+Add to `app/api/error_codes.py`:
+
+```python
+    "SlugAlreadyTaken": "Slug já está em uso.",
+    "ResourceTypeNotFound": "Tipo de recurso não encontrado.",
+```
+
+Add to `tests/unit/architecture/test_error_code_coverage.py` `handler_level_allowlist`:
+
+```python
+        "SlugAlreadyTaken",
+        "ResourceTypeNotFound",
+```
+
+- [ ] **Step 2: Architecture test passes (orphan check would fail otherwise)**
 
 ```bash
-.venv/bin/python -c "from app.domain.catalog.repository import IResourceTypeRepository; print('ok')"
+.venv/bin/pytest tests/unit/architecture/test_error_code_coverage.py -v
+.venv/bin/pytest -q
 ```
-
-Expect: `ok`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add app/domain/catalog/repository.py
+git add app/domain/catalog/repository.py \
+        app/api/error_codes.py \
+        tests/unit/architecture/test_error_code_coverage.py
 git commit -m "$(cat <<'EOF'
 feat(catalog): add IResourceTypeRepository Protocol
 
-list() takes only_active so the public route can show active-only
-while admin sees everything. delete() takes an id (idempotent;
-handler decides whether missing-id is an error).
+Persistence port with async add/update/delete/get/list signatures.
+Returns Result[None] on writes (Plan 03 convention) so handlers can
+distinguish persistence failures (SlugAlreadyTaken, ResourceTypeNotFound)
+from domain failures. Two read variants — list_all (admin, includes
+inactive) and list_active (public). Two new handler-level codes
+registered in pt-BR mapping + arch-test allowlist.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Unit A — verification before handoff
+---
 
-- [ ] Run the affected suites.
+### Task A4 — Self-check after Unit A
 
-```bash
-.venv/bin/pytest tests/unit/domain/shared/value_objects/ tests/unit/domain/catalog/ -q
-```
+No new code; verify everything still composes.
 
-Expect: all passing, no skips, no warnings about new code.
-
-- [ ] Run the full unit suite to confirm nothing else broke.
+- [ ] **Step 1: Smoke import**
 
 ```bash
-.venv/bin/pytest tests/unit/ -q
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.catalog.resource_type import ResourceType
+from app.domain.catalog.repository import IResourceTypeRepository
+from app.api.error_codes import ERROR_MESSAGES_PT_BR
+print('catalog domain loaded;', len(ERROR_MESSAGES_PT_BR), 'codes mapped')
+"
 ```
 
-Expect: all green.
+Expected: prints `catalog domain loaded; 49 codes mapped` (or similar — 42 from Plan 03 + 7 catalog codes = 49).
 
-- [ ] Run ruff on the new code.
+- [ ] **Step 2: Full suite + arch test**
 
 ```bash
-.venv/bin/python -m ruff check app/domain/catalog app/domain/shared/value_objects/slug.py tests/unit/domain/catalog tests/unit/domain/shared/value_objects/test_slug.py
+.venv/bin/pytest -q
 ```
 
-Expect: clean.
+Expected: green. Approximately 210 + (10 attribute + 17 resource_type) = ~237 tests passing.
+
+- [ ] **Step 3: No commit (verification only)**
 
 ---
 
-## UNIT B — Infrastructure layer
+## UNIT B — Infrastructure (mapping + migration + repository + integration test)
 
-### Task B1 — `ResourceTypeModel` mapping + register in `env.py`
+### Task B1 — `ResourceTypeModel` mapping + register in env.py
 
-**Files:** `app/infrastructure/db/mappings/resource_type.py`, `app/migrations/env.py` (modify).
+**Files:** create `app/infrastructure/db/mappings/resource_type.py`, modify `app/migrations/env.py`.
 
-- [ ] **Step 1: Implement the mapping**
+- [ ] **Step 1: Create the mapping**
 
 `app/infrastructure/db/mappings/resource_type.py`:
 
 ```python
 from __future__ import annotations
-from typing import Any
 from uuid import UUID
-from sqlalchemy import JSON, Boolean, String
+from sqlalchemy import JSON, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import CHAR
 from app.infrastructure.db.base import Base, TimestampMixin
@@ -1072,523 +1044,504 @@ class ResourceTypeModel(Base, TimestampMixin):
     __tablename__ = "resource_types"
 
     id: Mapped[UUID] = mapped_column(CHAR(36), primary_key=True)
-    slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
-    # Generic JSON — Postgres stores as JSON, SQLite as TEXT, both work.
-    # The repository serializes/deserializes list[AttributeDefinition] ↔ list[dict].
-    attribute_schema: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, nullable=False, default=list,
-    )
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    attribute_schema: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
 ```
 
-- [ ] **Step 2: Register the mapping with all `Base.metadata`-loading sites**
+- [ ] **Step 2: Register the model in env.py**
 
-There are THREE places that import mapping modules to register them with `Base.metadata`. All of them must learn about `resource_type` so it appears in:
-1. Alembic's autogenerate (so Task B3 picks up the new table)
-2. The integration test DB (so `db_session` in `tests/integration/conftest.py` creates `resource_types`)
-3. The e2e test DB (so `client` in `tests/e2e/conftest.py` creates `resource_types`)
-
-The pattern in all three is `from app.infrastructure.db.mappings import user  # noqa: F401` (or a similar `import ...` form for `env.py`). Add a sibling line for `resource_type` in each.
-
-**a) `app/migrations/env.py`**: locate the existing user mapping import and add right after it:
+Read `app/migrations/env.py`. Locate the section that imports models for autogenerate (look for a comment like `# import all mappings` or model imports near the top). Add:
 
 ```python
-from app.infrastructure.db.mappings import resource_type  # noqa: F401
+from app.infrastructure.db.mappings import resource_type  # noqa: F401  (registers metadata)
 ```
 
-(Match the existing convention — if env.py uses `import app.infrastructure.db.mappings.user`, mirror that form.)
+Group it alphabetically with the existing user import.
 
-**b) `tests/integration/conftest.py`**: locate `from app.infrastructure.db.mappings import user  # noqa: F401` and add:
-
-```python
-from app.infrastructure.db.mappings import resource_type  # noqa: F401
-```
-
-**c) `tests/e2e/conftest.py`**: locate `from app.infrastructure.db.mappings import user  # noqa: F401` and add:
-
-```python
-from app.infrastructure.db.mappings import resource_type  # noqa: F401
-```
-
-- [ ] **Step 3: Verify imports cleanly**
+- [ ] **Step 3: Smoke import**
 
 ```bash
-.venv/bin/python -c "from app.infrastructure.db.mappings.resource_type import ResourceTypeModel; print(ResourceTypeModel.__tablename__)"
-```
-
-Expect: `resource_types`.
-
-```bash
-.venv/bin/python -c "import app.migrations.env; print('ok')"
-```
-
-Expect: `ok` (import side-effect should register the new model with `Base.metadata`).
-
-- [ ] **Step 4: Sanity check — `Base.metadata` knows about `resource_types`**
-
-```bash
-.venv/bin/python -c "
-import app.migrations.env  # triggers all mapping imports
-from app.infrastructure.db.base import Base
-print(sorted(Base.metadata.tables.keys()))
-"
-```
-
-Expect output to include `'resource_types'`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add app/infrastructure/db/mappings/resource_type.py app/migrations/env.py tests/integration/conftest.py tests/e2e/conftest.py
-git commit -m "$(cat <<'EOF'
-feat(db): add resource_types mapping for catalog feature
-
-ResourceTypeModel uses generic sa.JSON for attribute_schema so the
-column shape is identical on Postgres (JSON) and SQLite (TEXT).
-Repository handles list[AttributeDefinition] ↔ list[dict]
-serialization at the boundary.
-
-Registers the mapping with alembic env.py + the integration and
-e2e conftests so autogenerate and the per-test create_all both
-see the new table.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
-### Task B2 — `ResourceTypeRepository` (SQLAlchemy adapter)
-
-**Files:** `app/infrastructure/repositories/resource_type_repository.py`, `tests/integration/catalog/__init__.py` (empty), `tests/integration/catalog/test_resource_type_repository.py`.
-
-- [ ] **Step 1: Failing test**
-
-`tests/integration/catalog/test_resource_type_repository.py`:
-
-```python
-from __future__ import annotations
-from uuid import uuid4
-import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
-from app.domain.catalog.resource_type import ResourceType
-from app.infrastructure.repositories.resource_type_repository import (
-    ResourceTypeRepository,
-)
-
-
-def _rt(slug: str = "football-field", *, name: str = "Campo de Futebol",
-        is_active: bool = True) -> ResourceType:
-    return ResourceType.create(
-        slug=slug, name=name, description="desc",
-        attribute_schema=[
-            AttributeDefinition.create(
-                key="surface", label="Piso", data_type=AttrType.STRING,
-                required=True, enum_values=None,
-            ).value,
-            AttributeDefinition.create(
-                key="lighting", label="Iluminação", data_type=AttrType.ENUM,
-                required=False, enum_values=["natural", "artificial"],
-            ).value,
-        ],
-        is_active=is_active,
-    ).value
-
-
-@pytest.mark.asyncio
-async def test_add_then_get_by_id_roundtrip(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    rt = _rt()
-    await repo.add(rt)
-    await db_session.commit()
-
-    found = await repo.get_by_id(rt.id)
-    assert found is not None
-    assert found.id == rt.id
-    assert str(found.slug) == "football-field"
-    assert found.name == "Campo de Futebol"
-    assert found.is_active is True
-    assert len(found.attribute_schema) == 2
-    # The second attribute is ENUM and round-trips its values
-    enum_attr = found.attribute_schema[1]
-    assert enum_attr.key == "lighting"
-    assert enum_attr.data_type is AttrType.ENUM
-    assert enum_attr.enum_values == ("natural", "artificial")
-
-
-@pytest.mark.asyncio
-async def test_get_by_slug(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    rt = _rt(slug="court")
-    await repo.add(rt)
-    await db_session.commit()
-
-    found = await repo.get_by_slug("court")
-    assert found is not None and found.id == rt.id
-    assert await repo.get_by_slug("missing") is None
-
-
-@pytest.mark.asyncio
-async def test_get_by_id_missing_returns_none(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    assert await repo.get_by_id(uuid4()) is None
-
-
-@pytest.mark.asyncio
-async def test_list_only_active_filter(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    a = _rt(slug="active-1", is_active=True)
-    b = _rt(slug="inactive-1", is_active=False)
-    c = _rt(slug="active-2", is_active=True)
-    await repo.add(a); await repo.add(b); await repo.add(c)
-    await db_session.commit()
-
-    all_rows = await repo.list(only_active=False)
-    assert {str(r.slug) for r in all_rows} == {"active-1", "inactive-1", "active-2"}
-
-    active_only = await repo.list(only_active=True)
-    assert {str(r.slug) for r in active_only} == {"active-1", "active-2"}
-
-
-@pytest.mark.asyncio
-async def test_list_pagination(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    for i in range(5):
-        await repo.add(_rt(slug=f"rt-{i}"))
-    await db_session.commit()
-
-    page1 = await repo.list(limit=2, offset=0)
-    page2 = await repo.list(limit=2, offset=2)
-    page3 = await repo.list(limit=2, offset=4)
-    assert len(page1) == 2
-    assert len(page2) == 2
-    assert len(page3) == 1
-    seen = {str(r.slug) for r in page1} | {str(r.slug) for r in page2} | {str(r.slug) for r in page3}
-    assert seen == {f"rt-{i}" for i in range(5)}
-
-
-@pytest.mark.asyncio
-async def test_update_persists_changes(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    rt = _rt()
-    await repo.add(rt)
-    await db_session.commit()
-
-    rt.update_metadata(name="Novo Nome", description="nova")
-    rt.deactivate()
-    await repo.update(rt)
-    await db_session.commit()
-
-    found = await repo.get_by_id(rt.id)
-    assert found is not None
-    assert found.name == "Novo Nome"
-    assert found.description == "nova"
-    assert found.is_active is False
-
-
-@pytest.mark.asyncio
-async def test_delete_removes_row(db_session: AsyncSession):
-    repo = ResourceTypeRepository(db_session)
-    rt = _rt()
-    await repo.add(rt)
-    await db_session.commit()
-
-    await repo.delete(rt.id)
-    await db_session.commit()
-
-    assert await repo.get_by_id(rt.id) is None
-
-
-@pytest.mark.asyncio
-async def test_unique_slug_constraint(db_session: AsyncSession):
-    from sqlalchemy.exc import IntegrityError
-    repo = ResourceTypeRepository(db_session)
-    a = _rt(slug="dup")
-    b = _rt(slug="dup")
-    await repo.add(a)
-    await db_session.commit()
-
-    await repo.add(b)
-    with pytest.raises(IntegrityError):
-        await db_session.commit()
-    await db_session.rollback()
-```
-
-The `db_session` fixture comes from `tests/integration/conftest.py` (already exists from the template). If the conftest is at `tests/conftest.py` and the integration suite uses a different fixture name, match what the existing `tests/integration/accounts/test_user_repository.py` uses — copy that fixture wiring exactly.
-
-- [ ] **Step 2: Run — expect FAIL.**
-
-```bash
-.venv/bin/pytest tests/integration/catalog/ -q
-```
-
-Expect: `ModuleNotFoundError: No module named 'app.infrastructure.repositories.resource_type_repository'`.
-
-- [ ] **Step 3: Implement**
-
-`app/infrastructure/repositories/resource_type_repository.py`:
-
-```python
-from __future__ import annotations
-from typing import Any, Sequence
-from uuid import UUID
-from sqlalchemy import select, delete as sa_delete
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
-from app.domain.catalog.repository import IResourceTypeRepository
-from app.domain.catalog.resource_type import ResourceType
-from app.domain.shared.value_objects.slug import Slug
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "
 from app.infrastructure.db.mappings.resource_type import ResourceTypeModel
-
-
-class ResourceTypeRepository(IResourceTypeRepository):
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def get_by_id(self, resource_type_id: UUID) -> ResourceType | None:
-        row = await self._session.get(ResourceTypeModel, str(resource_type_id))
-        return self._to_entity(row) if row else None
-
-    async def get_by_slug(self, slug: str) -> ResourceType | None:
-        stmt = select(ResourceTypeModel).where(ResourceTypeModel.slug == slug)
-        row = (await self._session.execute(stmt)).scalar_one_or_none()
-        return self._to_entity(row) if row else None
-
-    async def list(
-        self, *, limit: int = 50, offset: int = 0, only_active: bool = False,
-    ) -> Sequence[ResourceType]:
-        stmt = select(ResourceTypeModel)
-        if only_active:
-            stmt = stmt.where(ResourceTypeModel.is_active.is_(True))
-        stmt = stmt.order_by(ResourceTypeModel.slug).limit(limit).offset(offset)
-        rows = (await self._session.execute(stmt)).scalars().all()
-        return [self._to_entity(r) for r in rows]
-
-    async def add(self, resource_type: ResourceType) -> None:
-        self._session.add(self._to_model(resource_type))
-
-    async def update(self, resource_type: ResourceType) -> None:
-        existing = await self._session.get(ResourceTypeModel, str(resource_type.id))
-        if existing is None:
-            return
-        existing.slug = str(resource_type.slug)
-        existing.name = resource_type.name
-        existing.description = resource_type.description
-        existing.attribute_schema = [
-            self._attr_to_dict(a) for a in resource_type.attribute_schema
-        ]
-        existing.is_active = resource_type.is_active
-        existing.updated_at = resource_type.updated_at
-
-    async def delete(self, resource_type_id: UUID) -> None:
-        await self._session.execute(
-            sa_delete(ResourceTypeModel).where(
-                ResourceTypeModel.id == str(resource_type_id)
-            )
-        )
-
-    @staticmethod
-    def _to_model(rt: ResourceType) -> ResourceTypeModel:
-        return ResourceTypeModel(
-            id=str(rt.id),
-            slug=str(rt.slug),
-            name=rt.name,
-            description=rt.description,
-            attribute_schema=[
-                ResourceTypeRepository._attr_to_dict(a) for a in rt.attribute_schema
-            ],
-            is_active=rt.is_active,
-            created_at=rt.created_at,
-            updated_at=rt.updated_at,
-        )
-
-    @staticmethod
-    def _to_entity(row: ResourceTypeModel) -> ResourceType:
-        # Direct dataclass construction for trusted DB rows; bypasses
-        # ResourceType.create() so we don't re-run validation that
-        # write paths already enforced.
-        return ResourceType(
-            id=UUID(str(row.id)),
-            slug=Slug(value=row.slug),
-            name=row.name,
-            description=row.description,
-            attribute_schema=tuple(
-                ResourceTypeRepository._attr_from_dict(d)
-                for d in (row.attribute_schema or [])
-            ),
-            is_active=row.is_active,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-
-    @staticmethod
-    def _attr_to_dict(a: AttributeDefinition) -> dict[str, Any]:
-        return {
-            "key": a.key,
-            "label": a.label,
-            "data_type": a.data_type.value,
-            "required": a.required,
-            "enum_values": list(a.enum_values) if a.enum_values is not None else None,
-        }
-
-    @staticmethod
-    def _attr_from_dict(d: dict[str, Any]) -> AttributeDefinition:
-        # Direct construction for trusted DB rows; bypasses .create() validation.
-        return AttributeDefinition(
-            key=d["key"],
-            label=d["label"],
-            data_type=AttrType(d["data_type"]),
-            required=d["required"],
-            enum_values=tuple(d["enum_values"]) if d.get("enum_values") is not None else None,
-        )
-```
-
-- [ ] **Step 4: Run — expect PASS.**
-
-```bash
-.venv/bin/pytest tests/integration/catalog/ -q
-```
-
-If a fixture is missing or the test DB doesn't auto-create the table for tests, look at how `tests/integration/accounts/test_user_repository.py` handles it — it almost certainly relies on a fixture in `tests/conftest.py` that creates `Base.metadata.create_all` against the in-memory test DB. The catalog test should pick up the new table automatically because Task B1 registered it with `Base.metadata`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add app/infrastructure/repositories/resource_type_repository.py tests/integration/catalog/
-git commit -m "$(cat <<'EOF'
-feat(catalog): add ResourceTypeRepository SQLAlchemy adapter
-
-list() supports limit/offset and an only_active filter. The repo
-serializes AttributeDefinition VOs to/from list[dict] at the boundary,
-keeping the JSON column shape stable.
-
-Reconstitution via direct dataclass construction (no .create() call)
-trusts the DB; write-path validation already happened.
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-EOF
-)"
-```
-
-### Task B3 — Alembic migration
-
-**Files:** new revision under `app/migrations/versions/`.
-
-- [ ] **Step 1: Generate the migration**
-
-```bash
-.venv/bin/python -m alembic revision --autogenerate -m "catalog resource types table"
-```
-
-This creates a file like `app/migrations/versions/<timestamp>_catalog_resource_types_table.py`.
-
-- [ ] **Step 2: Inspect the generated file**
-
-Read the file. Expect to see:
-
-```python
-def upgrade() -> None:
-    op.create_table(
-        'resource_types',
-        sa.Column('id', sa.CHAR(length=36), nullable=False),
-        sa.Column('slug', sa.String(length=80), nullable=False),
-        sa.Column('name', sa.String(length=200), nullable=False),
-        sa.Column('description', sa.String(length=1000), nullable=False),
-        sa.Column('attribute_schema', sa.JSON(), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('slug'),
-    )
-    op.create_index(op.f('ix_resource_types_is_active'), 'resource_types', ['is_active'], unique=False)
-    op.create_index(op.f('ix_resource_types_slug'), 'resource_types', ['slug'], unique=False)
-
-
-def downgrade() -> None:
-    op.drop_index(op.f('ix_resource_types_slug'), table_name='resource_types')
-    op.drop_index(op.f('ix_resource_types_is_active'), table_name='resource_types')
-    op.drop_table('resource_types')
-```
-
-If the autogenerate misses something, edit the file to match. Common gotchas:
-- If the autogenerate output mentions ALTER TABLE on `users` (the accounts schema), reject the change — that means the `accounts` migration didn't capture the schema correctly. Diff against `app/migrations/versions/20260425_1414_accounts_users_schema.py` and figure out which mapping is out of sync.
-- The column order should follow the mapping declaration order. Reorder if needed.
-
-- [ ] **Step 3: Verify the migration runs against a fresh SQLite**
-
-```bash
-BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" \
-  .venv/bin/python -c "
-import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine
-import app.migrations.env  # registers all mappings
-from app.infrastructure.db.base import Base
-
-async def main():
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        rows = await conn.exec_driver_sql(\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\")
-        print([r[0] for r in rows])
-
-asyncio.run(main())
+print(ResourceTypeModel.__table__)
+print('columns:', [c.name for c in ResourceTypeModel.__table__.columns])
 "
 ```
 
-Expect output to include `'resource_types'` and `'users'` and the alembic version table.
+Expected: prints the table object and column list `['id', 'slug', 'name', 'description', 'attribute_schema', 'is_active', 'created_at', 'updated_at']`.
 
-- [ ] **Step 4: Run the FULL test suite to make sure nothing regressed**
+- [ ] **Step 4: Run full suite**
 
 ```bash
 .venv/bin/pytest -q
 ```
 
-Expect: green.
+Expected: green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/migrations/versions/
+git add app/infrastructure/db/mappings/resource_type.py app/migrations/env.py
 git commit -m "$(cat <<'EOF'
-feat(db): alembic migration creates resource_types table
+feat(catalog): add ResourceTypeModel mapping
 
-Adds the catalog feature's only table. JSON column for the
-attribute_schema list — adapts to Postgres JSON and SQLite TEXT
-without a dialect-specific column type.
+resource_types table with Text columns (VO governs length per spec
+§3 decision 17), JSON column for attribute_schema (dialect-portable
+between Postgres and SQLite tests), unique index on slug, regular
+index on is_active. Registered in migrations/env.py for autogenerate.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Unit B — verification before handoff
+---
 
-- [ ] Run all integration tests to confirm both `accounts` and `catalog` work.
+### Task B2 — Alembic migration
+
+Autogenerate the `resource_types` table migration on top of the existing initial_accounts revision.
+
+**Files:** new `app/migrations/versions/<timestamp>_catalog_resource_types_table.py`.
+
+- [ ] **Step 1: Autogenerate**
 
 ```bash
-.venv/bin/pytest tests/integration/ -q
+cd /Users/klayver/Repositories/agentic-workbench/venue-backend
+rm -f ./_alembic_tmp.db
+
+# Apply existing migrations to a temp SQLite first so the next autogen sees them.
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///./_alembic_tmp.db" .venv/bin/alembic upgrade head
+
+# Now autogenerate the new revision against that state.
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///./_alembic_tmp.db" .venv/bin/alembic revision --autogenerate -m "catalog resource types table"
+
+rm -f ./_alembic_tmp.db
 ```
 
-- [ ] Run ruff over the new infra code.
+- [ ] **Step 2: Inspect the generated file**
+
+The new file at `app/migrations/versions/<timestamp>_catalog_resource_types_table.py` should look roughly like:
+
+```python
+def upgrade() -> None:
+    op.create_table(
+        "resource_types",
+        sa.Column("id", sa.CHAR(length=36), nullable=False),
+        sa.Column("slug", sa.Text(), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("attribute_schema", sa.JSON(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(op.f("ix_resource_types_slug"), "resource_types", ["slug"], unique=True)
+    op.create_index(op.f("ix_resource_types_is_active"), "resource_types", ["is_active"], unique=False)
+
+
+def downgrade() -> None:
+    op.drop_index(op.f("ix_resource_types_is_active"), table_name="resource_types")
+    op.drop_index(op.f("ix_resource_types_slug"), table_name="resource_types")
+    op.drop_table("resource_types")
+```
+
+`down_revision` must point to `'643934c1e272'` (the initial_accounts revision from Plan 03). If autogen produced a different value, edit it.
+
+If autogen creates spurious DROP statements at the top of `upgrade()` (because of stale state), investigate before proceeding — there should be ONLY `op.create_table` + `op.create_index` calls in upgrade.
+
+- [ ] **Step 3: Run tests**
 
 ```bash
-.venv/bin/python -m ruff check app/infrastructure/db/mappings/resource_type.py app/infrastructure/repositories/resource_type_repository.py app/migrations/env.py app/migrations/versions/ tests/integration/catalog/
+.venv/bin/pytest -q
 ```
 
-Expect: clean.
+Expected: green (tests use `Base.metadata.create_all` not migrations, but verify nothing imports broke).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/migrations/versions/
+git commit -m "$(cat <<'EOF'
+feat(migrations): add resource_types table migration
+
+Autogenerated revision creating the resource_types table with Text
+columns, JSON column for attribute_schema, unique index on slug, and
+regular index on is_active. Stacks on top of the initial_accounts
+revision from Plan 03.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
 
 ---
 
-## UNIT C — Use cases (handlers)
+### Task B3 — `SQLAlchemyResourceTypeRepository` adapter + integration test
 
-### Task C1 — DTOs + in-memory fake repository
+The adapter implements `IResourceTypeRepository`. It serializes `AttributeDefinition` ↔ dict at the JSON boundary (per Decision 4). Reconstitution uses trusted constructors per the `BaseValueObject` convention.
 
-**Files:** `app/use_cases/catalog/__init__.py` (empty), `app/use_cases/catalog/dtos.py`, `app/use_cases/catalog/commands/__init__.py` (empty), `tests/unit/use_cases/catalog/__init__.py` (empty), `tests/unit/use_cases/catalog/commands/__init__.py` (empty), `tests/unit/use_cases/catalog/fakes/__init__.py` (empty), `tests/unit/use_cases/catalog/fakes/in_memory_resource_type_repository.py`.
+**Files:** create `app/infrastructure/repositories/resource_type_repository.py`, `tests/integration/catalog/__init__.py`, `tests/integration/catalog/test_resource_type_repository.py`.
 
-- [ ] **Step 1: Implement the DTOs**
+- [ ] **Step 1: Failing integration test**
+
+`tests/integration/catalog/__init__.py`: empty file.
+
+`tests/integration/catalog/test_resource_type_repository.py`:
+
+```python
+from __future__ import annotations
+import pytest
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.catalog.resource_type import ResourceType
+from app.infrastructure.repositories.resource_type_repository import (
+    SQLAlchemyResourceTypeRepository,
+)
+
+
+pytestmark = pytest.mark.asyncio
+
+
+def _make_rt(slug: str = "football-field", name: str = "Football Field", active: bool = True):
+    rt = ResourceType.create(
+        slug=slug,
+        name=name,
+        description="Campo gramado para futebol",
+        attribute_schema=[
+            AttributeDefinition.create(
+                key="surface", label="Tipo de gramado", data_type=AttrType.ENUM,
+                enum_values=["natural", "synthetic"],
+            ).value,
+            AttributeDefinition.create(
+                key="players", label="Jogadores", data_type=AttrType.INT, required=True,
+            ).value,
+        ],
+        is_active=active,
+    )
+    return rt.value
+
+
+async def test_add_and_get_by_id(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    rt = _make_rt()
+    r = await repo.add(rt)
+    assert r.is_success
+    fetched = await repo.get_by_id(rt.id)
+    assert fetched is not None
+    assert fetched.slug.value == "football-field"
+    assert fetched.name.value == "Football Field"
+    assert len(fetched.attribute_schema) == 2
+    surface = fetched.attribute_schema[0]
+    assert surface.data_type == AttrType.ENUM
+    assert surface.enum_values is not None
+    assert tuple(v.value for v in surface.enum_values) == ("natural", "synthetic")
+
+
+async def test_add_rejects_duplicate_slug(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    await repo.add(_make_rt(slug="court"))
+    r = await repo.add(_make_rt(slug="court"))
+    assert r.is_failure
+    assert r.error == "SlugAlreadyTaken"
+
+
+async def test_get_by_slug(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    rt = _make_rt(slug="padel-court")
+    await repo.add(rt)
+    fetched = await repo.get_by_slug("padel-court")
+    assert fetched is not None
+    assert fetched.id == rt.id
+
+
+async def test_get_by_slug_returns_none_when_absent(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    assert await repo.get_by_slug("missing") is None
+
+
+async def test_update_persists_changes(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    rt = _make_rt()
+    await repo.add(rt)
+    rt.update_metadata(name="Campo de Futebol", description="atualizado")
+    rt.deactivate()
+    r = await repo.update(rt)
+    assert r.is_success
+    fetched = await repo.get_by_id(rt.id)
+    assert fetched is not None
+    assert fetched.name.value == "Campo de Futebol"
+    assert fetched.is_active is False
+
+
+async def test_delete_removes_row(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    rt = _make_rt()
+    await repo.add(rt)
+    r = await repo.delete(rt.id)
+    assert r.is_success
+    assert await repo.get_by_id(rt.id) is None
+
+
+async def test_delete_returns_not_found_when_absent(db_session):
+    from uuid import uuid4
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    r = await repo.delete(uuid4())
+    assert r.is_failure
+    assert r.error == "ResourceTypeNotFound"
+
+
+async def test_list_all_includes_inactive(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    await repo.add(_make_rt(slug="active-1", active=True))
+    await repo.add(_make_rt(slug="inactive-1", active=False))
+    rows = await repo.list_all()
+    slugs = {r.slug.value for r in rows}
+    assert {"active-1", "inactive-1"} <= slugs
+
+
+async def test_list_active_excludes_inactive(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    await repo.add(_make_rt(slug="active-2", active=True))
+    await repo.add(_make_rt(slug="inactive-2", active=False))
+    rows = await repo.list_active()
+    slugs = {r.slug.value for r in rows}
+    assert "active-2" in slugs
+    assert "inactive-2" not in slugs
+
+
+async def test_list_pagination(db_session):
+    repo = SQLAlchemyResourceTypeRepository(db_session)
+    for i in range(5):
+        await repo.add(_make_rt(slug=f"page-{i}"))
+    page1 = await repo.list_all(limit=2, offset=0)
+    page2 = await repo.list_all(limit=2, offset=2)
+    assert len(page1) == 2
+    assert len(page2) == 2
+    assert {r.id for r in page1}.isdisjoint({r.id for r in page2})
+```
+
+The `db_session` fixture exists in `tests/conftest.py` (per Plan 02 setup); it provides an `AsyncSession` against an in-memory SQLite with all tables created via `Base.metadata.create_all`.
+
+- [ ] **Step 2: Run — fail (ImportError on resource_type_repository)**
+
+```bash
+.venv/bin/pytest tests/integration/catalog/test_resource_type_repository.py -v
+```
+
+- [ ] **Step 3: Implementation**
+
+`app/infrastructure/repositories/resource_type_repository.py`:
+
+```python
+from __future__ import annotations
+from typing import Any
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.result import Result
+from app.domain.shared.value_objects.attribute_key import AttributeKey
+from app.domain.shared.value_objects.name import Name
+from app.domain.shared.value_objects.short_description import ShortDescription
+from app.domain.shared.value_objects.short_name import ShortName
+from app.domain.shared.value_objects.slug import Slug
+from app.infrastructure.db.mappings.resource_type import ResourceTypeModel
+
+
+def _attribute_to_dict(a: AttributeDefinition) -> dict[str, Any]:
+    return {
+        "key": a.key.value,
+        "label": a.label.value,
+        "data_type": a.data_type.value,
+        "required": a.required,
+        "enum_values": [v.value for v in a.enum_values] if a.enum_values else None,
+    }
+
+
+def _attribute_from_dict(d: dict[str, Any]) -> AttributeDefinition:
+    """Trusted reconstitution from DB JSON. Bypasses VO factory validation."""
+    enum_vos = (
+        tuple(ShortName(value=v) for v in d["enum_values"])
+        if d.get("enum_values") is not None
+        else None
+    )
+    return AttributeDefinition(
+        key=AttributeKey(value=d["key"]),
+        label=ShortName(value=d["label"]),
+        data_type=AttrType(d["data_type"]),
+        required=d["required"],
+        enum_values=enum_vos,
+    )
+
+
+def _to_entity(model: ResourceTypeModel) -> ResourceType:
+    """Trusted reconstitution from DB row."""
+    rt = ResourceType(
+        id=model.id,  # type: ignore[arg-type]
+        slug=Slug(value=model.slug),
+        name=Name(value=model.name),
+        description=ShortDescription(value=model.description),
+        is_active=model.is_active,
+        _attribute_schema=[_attribute_from_dict(d) for d in (model.attribute_schema or [])],
+    )
+    rt.created_at = model.created_at
+    rt.updated_at = model.updated_at
+    return rt
+
+
+def _to_model_dict(rt: ResourceType) -> dict[str, Any]:
+    return {
+        "id": str(rt.id),
+        "slug": rt.slug.value,
+        "name": rt.name.value,
+        "description": rt.description.value,
+        "is_active": rt.is_active,
+        "attribute_schema": [_attribute_to_dict(a) for a in rt.attribute_schema],
+        "created_at": rt.created_at,
+        "updated_at": rt.updated_at,
+    }
+
+
+class SQLAlchemyResourceTypeRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def add(self, rt: ResourceType) -> Result[None]:
+        model = ResourceTypeModel(**_to_model_dict(rt))
+        self._session.add(model)
+        try:
+            await self._session.flush()
+        except IntegrityError:
+            await self._session.rollback()
+            return Result.failure("SlugAlreadyTaken", status_code=409)
+        return Result.success(None)
+
+    async def update(self, rt: ResourceType) -> Result[None]:
+        stmt = select(ResourceTypeModel).where(ResourceTypeModel.id == str(rt.id))
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return Result.failure("ResourceTypeNotFound", status_code=404)
+        row.slug = rt.slug.value
+        row.name = rt.name.value
+        row.description = rt.description.value
+        row.is_active = rt.is_active
+        row.attribute_schema = [_attribute_to_dict(a) for a in rt.attribute_schema]
+        row.updated_at = rt.updated_at
+        try:
+            await self._session.flush()
+        except IntegrityError:
+            await self._session.rollback()
+            return Result.failure("SlugAlreadyTaken", status_code=409)
+        return Result.success(None)
+
+    async def delete(self, rt_id: UUID) -> Result[None]:
+        stmt = select(ResourceTypeModel).where(ResourceTypeModel.id == str(rt_id))
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return Result.failure("ResourceTypeNotFound", status_code=404)
+        await self._session.delete(row)
+        await self._session.flush()
+        return Result.success(None)
+
+    async def get_by_id(self, rt_id: UUID) -> ResourceType | None:
+        stmt = select(ResourceTypeModel).where(ResourceTypeModel.id == str(rt_id))
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(row) if row else None
+
+    async def get_by_slug(self, slug: str) -> ResourceType | None:
+        stmt = select(ResourceTypeModel).where(ResourceTypeModel.slug == slug)
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(row) if row else None
+
+    async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        stmt = (
+            select(ResourceTypeModel)
+            .order_by(ResourceTypeModel.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(r) for r in rows]
+
+    async def list_active(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        stmt = (
+            select(ResourceTypeModel)
+            .where(ResourceTypeModel.is_active.is_(True))
+            .order_by(ResourceTypeModel.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(r) for r in rows]
+```
+
+- [ ] **Step 4: Run integration test**
+
+```bash
+.venv/bin/pytest tests/integration/catalog/test_resource_type_repository.py -v
+```
+
+If `db_session` fixture isn't visible, it likely lives in `tests/conftest.py` or `tests/integration/conftest.py`. Check accounts integration tests for the pattern; if there's a separate conftest needed for `tests/integration/catalog/`, add it (just `from tests.integration.accounts.conftest import db_session  # noqa` or by importing the shared fixture).
+
+Expected: 10 tests pass.
+
+- [ ] **Step 5: Run full suite**
+
+```bash
+.venv/bin/pytest -q
+```
+
+Expected: green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/infrastructure/repositories/resource_type_repository.py \
+        tests/integration/catalog/__init__.py \
+        tests/integration/catalog/test_resource_type_repository.py
+git commit -m "$(cat <<'EOF'
+feat(catalog): SQLAlchemy adapter for IResourceTypeRepository
+
+CRUD against the resource_types table. Serializes
+AttributeDefinition ↔ dict at the JSON boundary; reconstitution uses
+trusted VO constructors (Slug(value=...), Name(value=...), etc.) per
+the BaseValueObject convention. IntegrityError on slug uniqueness is
+caught and surfaced as SlugAlreadyTaken (409). Missing rows on
+update/delete return ResourceTypeNotFound (404). list_all and
+list_active variants serve admin and public reads respectively.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## UNIT C — Use cases
+
+### Task C1 — DTOs + in-memory fake repo
+
+**Files:** create `app/use_cases/catalog/__init__.py`, `app/use_cases/catalog/dtos.py`, `app/use_cases/catalog/commands/__init__.py`, `tests/unit/use_cases/catalog/__init__.py`, `tests/unit/use_cases/catalog/fakes/__init__.py`, `tests/unit/use_cases/catalog/fakes/in_memory_resource_type_repository.py`.
+
+- [ ] **Step 1: Create the empty `__init__.py` files**
+
+```bash
+mkdir -p app/use_cases/catalog/commands
+touch app/use_cases/catalog/__init__.py
+touch app/use_cases/catalog/commands/__init__.py
+mkdir -p tests/unit/use_cases/catalog/commands
+mkdir -p tests/unit/use_cases/catalog/fakes
+touch tests/unit/use_cases/catalog/__init__.py
+touch tests/unit/use_cases/catalog/commands/__init__.py
+touch tests/unit/use_cases/catalog/fakes/__init__.py
+```
+
+- [ ] **Step 2: DTOs**
 
 `app/use_cases/catalog/dtos.py`:
 
@@ -1596,617 +1549,536 @@ Expect: clean.
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Self
 from uuid import UUID
-from app.domain.catalog.attribute import AttributeDefinition
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True)
 class AttributeDefinitionDto:
     key: str
     label: str
-    data_type: str  # AttrType.value (string|int|bool|enum)
+    data_type: str
     required: bool
-    enum_values: tuple[str, ...] | None
+    enum_values: list[str] | None
 
     @classmethod
-    def from_vo(cls, a: AttributeDefinition) -> Self:
+    def from_vo(cls, a: AttributeDefinition) -> "AttributeDefinitionDto":
         return cls(
-            key=a.key,
-            label=a.label,
+            key=a.key.value,
+            label=a.label.value,
             data_type=a.data_type.value,
             required=a.required,
-            enum_values=a.enum_values,
+            enum_values=[v.value for v in a.enum_values] if a.enum_values else None,
         )
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True)
 class ResourceTypeDto:
     id: UUID
     slug: str
     name: str
     description: str
-    attribute_schema: tuple[AttributeDefinitionDto, ...]
+    attribute_schema: list[AttributeDefinitionDto]
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def from_entity(cls, rt: ResourceType) -> Self:
+    def from_entity(cls, rt: ResourceType) -> "ResourceTypeDto":
         return cls(
             id=rt.id,
-            slug=str(rt.slug),
-            name=rt.name,
-            description=rt.description,
-            attribute_schema=tuple(
-                AttributeDefinitionDto.from_vo(a) for a in rt.attribute_schema
-            ),
+            slug=rt.slug.value,
+            name=rt.name.value,
+            description=rt.description.value,
+            attribute_schema=[AttributeDefinitionDto.from_vo(a) for a in rt.attribute_schema],
             is_active=rt.is_active,
             created_at=rt.created_at,
             updated_at=rt.updated_at,
         )
 ```
 
-- [ ] **Step 2: Implement the in-memory fake repo**
+- [ ] **Step 3: In-memory fake**
 
 `tests/unit/use_cases/catalog/fakes/in_memory_resource_type_repository.py`:
 
 ```python
 from __future__ import annotations
-from typing import Sequence
 from uuid import UUID
-from app.domain.catalog.repository import IResourceTypeRepository
 from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.result import Result
 
 
-class InMemoryResourceTypeRepository(IResourceTypeRepository):
+class InMemoryResourceTypeRepository:
+    """Test fake implementing IResourceTypeRepository."""
+
     def __init__(self) -> None:
         self._by_id: dict[UUID, ResourceType] = {}
 
-    async def get_by_id(self, resource_type_id: UUID) -> ResourceType | None:
-        return self._by_id.get(resource_type_id)
+    async def add(self, rt: ResourceType) -> Result[None]:
+        if any(existing.slug.value == rt.slug.value for existing in self._by_id.values()):
+            return Result.failure("SlugAlreadyTaken", status_code=409)
+        self._by_id[rt.id] = rt
+        return Result.success(None)
+
+    async def update(self, rt: ResourceType) -> Result[None]:
+        if rt.id not in self._by_id:
+            return Result.failure("ResourceTypeNotFound", status_code=404)
+        clash = next(
+            (other for other in self._by_id.values()
+             if other.id != rt.id and other.slug.value == rt.slug.value),
+            None,
+        )
+        if clash is not None:
+            return Result.failure("SlugAlreadyTaken", status_code=409)
+        self._by_id[rt.id] = rt
+        return Result.success(None)
+
+    async def delete(self, rt_id: UUID) -> Result[None]:
+        if rt_id not in self._by_id:
+            return Result.failure("ResourceTypeNotFound", status_code=404)
+        del self._by_id[rt_id]
+        return Result.success(None)
+
+    async def get_by_id(self, rt_id: UUID) -> ResourceType | None:
+        return self._by_id.get(rt_id)
 
     async def get_by_slug(self, slug: str) -> ResourceType | None:
-        for rt in self._by_id.values():
-            if str(rt.slug) == slug:
-                return rt
-        return None
+        return next(
+            (rt for rt in self._by_id.values() if rt.slug.value == slug),
+            None,
+        )
 
-    async def list(
-        self, *, limit: int = 50, offset: int = 0, only_active: bool = False,
-    ) -> Sequence[ResourceType]:
-        rows = sorted(self._by_id.values(), key=lambda r: str(r.slug))
-        if only_active:
-            rows = [r for r in rows if r.is_active]
+    async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        rows = sorted(self._by_id.values(), key=lambda rt: rt.created_at)
         return rows[offset:offset + limit]
 
-    async def add(self, resource_type: ResourceType) -> None:
-        if resource_type.id in self._by_id:
-            raise ValueError(f"ResourceType {resource_type.id} already exists.")
-        # Mimic the unique slug constraint
-        if any(str(r.slug) == str(resource_type.slug) for r in self._by_id.values()):
-            from sqlalchemy.exc import IntegrityError
-            raise IntegrityError("UNIQUE constraint failed: resource_types.slug", None, Exception())
-        self._by_id[resource_type.id] = resource_type
-
-    async def update(self, resource_type: ResourceType) -> None:
-        if resource_type.id in self._by_id:
-            self._by_id[resource_type.id] = resource_type
-
-    async def delete(self, resource_type_id: UUID) -> None:
-        self._by_id.pop(resource_type_id, None)
+    async def list_active(self, *, limit: int = 50, offset: int = 0) -> list[ResourceType]:
+        rows = sorted(
+            (rt for rt in self._by_id.values() if rt.is_active),
+            key=lambda rt: rt.created_at,
+        )
+        return rows[offset:offset + limit]
 ```
 
-- [ ] **Step 3: Verify the fake imports cleanly + sanity test**
+- [ ] **Step 4: Smoke test the DTO**
 
-`tests/unit/use_cases/catalog/test_dtos.py`:
-
-```python
-from __future__ import annotations
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
+```bash
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
-from app.use_cases.catalog.dtos import AttributeDefinitionDto, ResourceTypeDto
-
-
-def test_resource_type_dto_round_trip():
-    a = AttributeDefinition.create(
-        key="lighting", label="Iluminação", data_type=AttrType.ENUM,
-        required=False, enum_values=["natural", "artificial"],
-    ).value
-    rt = ResourceType.create(
-        slug="court", name="Quadra", description="d", attribute_schema=[a],
-    ).value
-    dto = ResourceTypeDto.from_entity(rt)
-    assert dto.id == rt.id
-    assert dto.slug == "court"
-    assert dto.name == "Quadra"
-    assert dto.is_active is True
-    assert len(dto.attribute_schema) == 1
-    a_dto = dto.attribute_schema[0]
-    assert a_dto.key == "lighting"
-    assert a_dto.data_type == "enum"
-    assert a_dto.enum_values == ("natural", "artificial")
+from app.use_cases.catalog.dtos import ResourceTypeDto
+rt = ResourceType.create(
+    slug='football-field', name='Football Field', description='',
+    attribute_schema=[AttributeDefinition.create(
+        key='size', label='Tamanho', data_type=AttrType.STRING).value],
+).value
+dto = ResourceTypeDto.from_entity(rt)
+print(dto.slug, dto.name, dto.attribute_schema[0].key)
+"
 ```
 
+Expected: prints `football-field Football Field size`.
+
+- [ ] **Step 5: Run full suite**
+
 ```bash
-.venv/bin/pytest tests/unit/use_cases/catalog/test_dtos.py -q
+.venv/bin/pytest -q
 ```
 
-Expect: PASS.
+Expected: green.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add app/use_cases/catalog/ tests/unit/use_cases/catalog/__init__.py tests/unit/use_cases/catalog/commands/__init__.py tests/unit/use_cases/catalog/fakes/ tests/unit/use_cases/catalog/test_dtos.py
+git add app/use_cases/catalog/ tests/unit/use_cases/catalog/
 git commit -m "$(cat <<'EOF'
-feat(catalog): add DTOs + in-memory fake repository
+feat(catalog): add use-case DTOs + in-memory fake repository
 
-ResourceTypeDto and AttributeDefinitionDto carry the entity shape
-across the use-cases ↔ API boundary. The in-memory fake mimics the
-unique-slug constraint by raising IntegrityError, so handler tests
-exercise the same conflict path as integration tests.
+ResourceTypeDto and AttributeDefinitionDto flatten VO-typed entity
+fields to plain types for HTTP serialization. InMemoryResourceType
+Repository is the test fake matching the IResourceTypeRepository
+Protocol — handlers in C2-C4 use it; the SQLAlchemy adapter (B3) is
+its production counterpart.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
+---
+
 ### Task C2 — `CreateResourceTypeHandler`
 
 **Files:** `app/use_cases/catalog/commands/create_resource_type.py`, `tests/unit/use_cases/catalog/commands/test_create_resource_type.py`.
 
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Failing tests**
 
 `tests/unit/use_cases/catalog/commands/test_create_resource_type.py`:
 
 ```python
 from __future__ import annotations
 import pytest
+from app.domain.catalog.attribute import AttrType
 from app.use_cases.catalog.commands.create_resource_type import (
-    AttributeInput, CreateResourceTypeCommand, CreateResourceTypeHandler,
+    CreateResourceTypeCommand,
+    CreateResourceTypeHandler,
 )
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import (
     InMemoryResourceTypeRepository,
 )
 
 
-@pytest.mark.asyncio
+pytestmark = pytest.mark.asyncio
+
+
+def _cmd(**kw) -> CreateResourceTypeCommand:
+    base = dict(
+        slug="football-field",
+        name="Football Field",
+        description="Campo de futebol",
+        attribute_schema=[
+            {"key": "size", "label": "Tamanho", "data_type": "string", "required": True, "enum_values": None},
+        ],
+    )
+    base.update(kw)
+    return CreateResourceTypeCommand(**base)
+
+
 async def test_create_resource_type_success():
     repo = InMemoryResourceTypeRepository()
     handler = CreateResourceTypeHandler(repo)
-    cmd = CreateResourceTypeCommand(
-        slug="football-field",
-        name="Campo de Futebol",
-        description="Campo gramado.",
-        attribute_schema=[
-            AttributeInput(
-                key="surface", label="Piso", data_type="string",
-                required=True, enum_values=None,
-            ),
-            AttributeInput(
-                key="lighting", label="Iluminação", data_type="enum",
-                required=False, enum_values=["natural", "artificial"],
-            ),
-        ],
-    )
-    r = await handler.handle(cmd)
+    r = await handler.handle(_cmd())
     assert r.is_success
-    dto = r.value
-    assert dto.slug == "football-field"
-    assert dto.name == "Campo de Futebol"
-    assert dto.is_active is True
-    assert len(dto.attribute_schema) == 2
+    assert r.value.slug == "football-field"
+    assert r.value.is_active is True
+    assert (await repo.get_by_id(r.value.id)) is not None
 
 
-@pytest.mark.asyncio
-async def test_create_resource_type_invalid_slug_returns_422():
+async def test_create_resource_type_propagates_slug_failure():
     repo = InMemoryResourceTypeRepository()
     handler = CreateResourceTypeHandler(repo)
-    cmd = CreateResourceTypeCommand(
-        slug="Invalid Slug!", name="X", description="",
-        attribute_schema=[],
-    )
-    r = await handler.handle(cmd)
+    r = await handler.handle(_cmd(slug="Invalid Slug!"))
     assert r.is_failure
-    assert r.status_code == 422
+    assert "SlugInvalidFormat" in r.error
 
 
-@pytest.mark.asyncio
-async def test_create_resource_type_invalid_attribute_returns_422():
+async def test_create_resource_type_rejects_duplicate_slug():
     repo = InMemoryResourceTypeRepository()
     handler = CreateResourceTypeHandler(repo)
-    cmd = CreateResourceTypeCommand(
-        slug="x", name="X", description="",
+    await handler.handle(_cmd())
+    r = await handler.handle(_cmd(name="Other"))
+    assert r.is_failure
+    assert r.error == "SlugAlreadyTaken"
+
+
+async def test_create_resource_type_with_enum_attribute():
+    repo = InMemoryResourceTypeRepository()
+    handler = CreateResourceTypeHandler(repo)
+    r = await handler.handle(_cmd(
+        slug="padel-court",
         attribute_schema=[
-            AttributeInput(
-                key="bad",
-                label="X",
-                data_type="enum",
-                required=False,
-                enum_values=None,  # ENUM with no values — invalid
-            ),
+            {"key": "surface", "label": "Tipo", "data_type": "enum", "required": False,
+             "enum_values": ["natural", "synthetic"]},
         ],
-    )
-    r = await handler.handle(cmd)
-    assert r.is_failure
-    assert r.status_code == 422
-    assert "enum" in r.error.lower()
-
-
-@pytest.mark.asyncio
-async def test_create_resource_type_unknown_data_type_returns_422():
-    repo = InMemoryResourceTypeRepository()
-    handler = CreateResourceTypeHandler(repo)
-    cmd = CreateResourceTypeCommand(
-        slug="x", name="X", description="",
-        attribute_schema=[
-            AttributeInput(
-                key="bad", label="X", data_type="float",  # not in AttrType
-                required=False, enum_values=None,
-            ),
-        ],
-    )
-    r = await handler.handle(cmd)
-    assert r.is_failure
-    assert r.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_create_resource_type_duplicate_slug_returns_409():
-    repo = InMemoryResourceTypeRepository()
-    handler = CreateResourceTypeHandler(repo)
-    first = await handler.handle(CreateResourceTypeCommand(
-        slug="dup", name="A", description="", attribute_schema=[],
-    ))
-    assert first.is_success
-    second = await handler.handle(CreateResourceTypeCommand(
-        slug="dup", name="B", description="", attribute_schema=[],
-    ))
-    assert second.is_failure
-    assert second.status_code == 409
-    assert "slug" in second.error.lower() or "dup" in second.error.lower()
-
-
-@pytest.mark.asyncio
-async def test_create_resource_type_success_carries_201():
-    repo = InMemoryResourceTypeRepository()
-    handler = CreateResourceTypeHandler(repo)
-    r = await handler.handle(CreateResourceTypeCommand(
-        slug="x", name="X", description="", attribute_schema=[],
     ))
     assert r.is_success
-    assert r.status_code == 201
+    assert r.value.attribute_schema[0].data_type == "enum"
+    assert r.value.attribute_schema[0].enum_values == ["natural", "synthetic"]
 ```
 
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — fail**
 
 ```bash
-.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_create_resource_type.py -q
+.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_create_resource_type.py -v
 ```
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implementation**
 
 `app/use_cases/catalog/commands/create_resource_type.py`:
 
 ```python
 from __future__ import annotations
-from dataclasses import dataclass
-from sqlalchemy.exc import IntegrityError
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
-from app.domain.catalog.repository import IResourceTypeRepository
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+from uuid import UUID
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
 from app.domain.shared.result import Result
 from app.use_cases.catalog.dtos import ResourceTypeDto
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AttributeInput:
-    key: str
-    label: str
-    data_type: str  # raw string from API; converted to AttrType inside handler
-    required: bool
-    enum_values: list[str] | None
+class _RepoLike(Protocol):
+    async def add(self, rt: ResourceType) -> Result[None]: ...
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True)
 class CreateResourceTypeCommand:
     slug: str
     name: str
     description: str
-    attribute_schema: list[AttributeInput]
+    attribute_schema: list[dict[str, Any]] = field(default_factory=list)
+    is_active: bool = True
 
 
 class CreateResourceTypeHandler:
-    def __init__(self, repo: IResourceTypeRepository) -> None:
+    def __init__(self, repo: _RepoLike) -> None:
         self._repo = repo
 
     async def handle(self, cmd: CreateResourceTypeCommand) -> Result[ResourceTypeDto]:
-        attrs_or_err = _build_attributes(cmd.attribute_schema)
-        if attrs_or_err.is_failure:
-            return Result.failure(attrs_or_err.error, status_code=422)
+        # Build AttributeDefinition VOs from raw dict input.
+        defs: list[AttributeDefinition] = []
+        errors: list[str] = []
+        for raw in cmd.attribute_schema:
+            try:
+                dt = AttrType(raw["data_type"])
+            except ValueError:
+                errors.append(f"InvalidDataType:{raw.get('data_type')!r}")
+                continue
+            r = AttributeDefinition.create(
+                key=raw["key"],
+                label=raw["label"],
+                data_type=dt,
+                required=raw.get("required", False),
+                enum_values=raw.get("enum_values"),
+            )
+            if r.is_failure:
+                errors.append(r.error)
+            else:
+                defs.append(r.value)
+
+        if errors:
+            return Result.failure("; ".join(errors), status_code=400)
 
         rt_r = ResourceType.create(
             slug=cmd.slug,
             name=cmd.name,
             description=cmd.description,
-            attribute_schema=attrs_or_err.value,
+            attribute_schema=defs,
+            is_active=cmd.is_active,
         )
         if rt_r.is_failure:
-            return Result.failure(rt_r.error, status_code=422)
-        rt = rt_r.value
+            return Result.failure(rt_r.error, status_code=400)
 
-        try:
-            await self._repo.add(rt)
-        except IntegrityError:
-            return Result.failure(
-                f"Já existe um ResourceType com slug '{cmd.slug}'.",
-                status_code=409,
-            )
+        add_r = await self._repo.add(rt_r.value)
+        if add_r.is_failure:
+            return Result.failure(add_r.error, status_code=add_r.status_code or 409)
 
-        return Result.success(ResourceTypeDto.from_entity(rt), status_code=201)
-
-
-def _build_attributes(
-    inputs: list[AttributeInput],
-) -> Result[list[AttributeDefinition]]:
-    """Helper used by Create + Update handlers. The caller maps failures
-    to a status code (422 in both current callers)."""
-    errors: list[str] = []
-    out: list[AttributeDefinition] = []
-    for i, inp in enumerate(inputs):
-        try:
-            data_type = AttrType(inp.data_type)
-        except ValueError:
-            errors.append(
-                f"attribute_schema[{i}].data_type inválido: '{inp.data_type}'. "
-                f"Valores permitidos: {', '.join(t.value for t in AttrType)}."
-            )
-            continue
-        a_r = AttributeDefinition.create(
-            key=inp.key, label=inp.label, data_type=data_type,
-            required=inp.required, enum_values=inp.enum_values,
-        )
-        if a_r.is_failure:
-            errors.append(f"attribute_schema[{i}]: {a_r.error}")
-            continue
-        out.append(a_r.value)
-    if errors:
-        return Result.failure("; ".join(errors))
-    return Result.success(out)
+        return Result.success(ResourceTypeDto.from_entity(rt_r.value))
 ```
 
-- [ ] **Step 4: Run — expect PASS.**
+The new code `"InvalidDataType"` is emitted at the handler boundary. Add to `app/api/error_codes.py`:
+
+```python
+    "InvalidDataType": "Tipo de dado de atributo desconhecido.",
+```
+
+And to the architecture-test allowlist:
+
+```python
+        "InvalidDataType",
+```
+
+- [ ] **Step 4: Run — green**
 
 ```bash
-.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_create_resource_type.py -q
+.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_create_resource_type.py tests/unit/architecture/test_error_code_coverage.py -v
+.venv/bin/pytest -q
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/use_cases/catalog/commands/create_resource_type.py tests/unit/use_cases/catalog/commands/test_create_resource_type.py
+git add app/use_cases/catalog/commands/create_resource_type.py \
+        tests/unit/use_cases/catalog/commands/test_create_resource_type.py \
+        app/api/error_codes.py tests/unit/architecture/test_error_code_coverage.py
 git commit -m "$(cat <<'EOF'
-feat(catalog): add CreateResourceTypeHandler
+feat(catalog): CreateResourceTypeHandler
 
-Accepts an AttributeInput list (DTO from API), translates each entry
-to an AttributeDefinition VO via .create(), then constructs the
-aggregate via ResourceType.create(). Maps SQLAlchemy IntegrityError
-on duplicate slug to a domain-language Result.failure.
+Builds AttributeDefinition VOs from raw dict input (aggregating
+failures), constructs ResourceType, persists via repo, returns DTO.
+Emits InvalidDataType when raw data_type doesn't match the AttrType
+enum; propagates downstream codes (slug/name validation, slug
+uniqueness conflict).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
+---
+
 ### Task C3 — `UpdateResourceTypeHandler`
+
+Partial update: any field provided is updated; absent fields stay. `attribute_schema`, when provided, is replaced wholesale (per Decision 5).
 
 **Files:** `app/use_cases/catalog/commands/update_resource_type.py`, `tests/unit/use_cases/catalog/commands/test_update_resource_type.py`.
 
-Partial-update handler: any of `name`, `description`, `attribute_schema`, `is_active` may be None (not provided) or a value (apply). At least one must be provided.
-
-- [ ] **Step 1: Failing test**
-
-`tests/unit/use_cases/catalog/commands/test_update_resource_type.py`:
+- [ ] **Step 1: Failing tests**
 
 ```python
 from __future__ import annotations
-from uuid import uuid4
 import pytest
-from app.domain.catalog.attribute import AttributeDefinition, AttrType
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
-from app.use_cases.catalog.commands.create_resource_type import AttributeInput
 from app.use_cases.catalog.commands.update_resource_type import (
-    UpdateResourceTypeCommand, UpdateResourceTypeHandler,
+    UpdateResourceTypeCommand,
+    UpdateResourceTypeHandler,
 )
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import (
     InMemoryResourceTypeRepository,
 )
 
 
-def _seed_rt(repo: InMemoryResourceTypeRepository, slug: str = "x") -> ResourceType:
+pytestmark = pytest.mark.asyncio
+
+
+async def _setup_repo_with_one():
+    repo = InMemoryResourceTypeRepository()
     rt = ResourceType.create(
-        slug=slug, name="Old", description="old desc",
+        slug="football-field", name="Football Field", description="",
         attribute_schema=[
             AttributeDefinition.create(
-                key="surface", label="Piso", data_type=AttrType.STRING,
-                required=True, enum_values=None,
+                key="size", label="Tamanho", data_type=AttrType.STRING,
             ).value,
         ],
     ).value
-    repo._by_id[rt.id] = rt  # bypass add() to avoid the conflict path
-    return rt
+    await repo.add(rt)
+    return repo, rt
 
 
-@pytest.mark.asyncio
-async def test_update_name_and_description():
-    repo = InMemoryResourceTypeRepository()
-    rt = _seed_rt(repo)
+async def test_update_changes_name_and_description():
+    repo, rt = await _setup_repo_with_one()
     handler = UpdateResourceTypeHandler(repo)
     r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name="New",
-        description="new desc",
-        attribute_schema=None,
-        is_active=None,
+        id=rt.id, name="Campo de Futebol", description="atualizado",
     ))
     assert r.is_success
-    dto = r.value
-    assert dto.name == "New"
-    assert dto.description == "new desc"
-    # Untouched
-    assert dto.is_active is True
-    assert len(dto.attribute_schema) == 1
+    fetched = await repo.get_by_id(rt.id)
+    assert fetched.name.value == "Campo de Futebol"
+    assert fetched.description.value == "atualizado"
 
 
-@pytest.mark.asyncio
-async def test_update_attribute_schema_replaces_wholesale():
-    repo = InMemoryResourceTypeRepository()
-    rt = _seed_rt(repo)
+async def test_update_replaces_attribute_schema_wholesale():
+    repo, rt = await _setup_repo_with_one()
     handler = UpdateResourceTypeHandler(repo)
     r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name=None, description=None, is_active=None,
+        id=rt.id,
         attribute_schema=[
-            AttributeInput(
-                key="lighting", label="L", data_type="enum",
-                required=False, enum_values=["a", "b"],
-            ),
+            {"key": "players", "label": "Jogadores", "data_type": "int", "required": True, "enum_values": None},
         ],
     ))
     assert r.is_success
-    dto = r.value
-    assert len(dto.attribute_schema) == 1
-    assert dto.attribute_schema[0].key == "lighting"
+    fetched = await repo.get_by_id(rt.id)
+    assert len(fetched.attribute_schema) == 1
+    assert fetched.attribute_schema[0].key.value == "players"
 
 
-@pytest.mark.asyncio
-async def test_update_attribute_schema_invalid_returns_422():
-    repo = InMemoryResourceTypeRepository()
-    rt = _seed_rt(repo)
+async def test_update_toggles_is_active():
+    repo, rt = await _setup_repo_with_one()
+    handler = UpdateResourceTypeHandler(repo)
+    r = await handler.handle(UpdateResourceTypeCommand(id=rt.id, is_active=False))
+    assert r.is_success
+    fetched = await repo.get_by_id(rt.id)
+    assert fetched.is_active is False
+
+
+async def test_update_returns_not_found_for_missing_id():
+    from uuid import uuid4
+    repo, _ = await _setup_repo_with_one()
+    handler = UpdateResourceTypeHandler(repo)
+    r = await handler.handle(UpdateResourceTypeCommand(id=uuid4(), name="x"))
+    assert r.is_failure
+    assert r.error == "ResourceTypeNotFound"
+
+
+async def test_update_propagates_attribute_schema_validation_failure():
+    repo, rt = await _setup_repo_with_one()
     handler = UpdateResourceTypeHandler(repo)
     r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name=None, description=None, is_active=None,
+        id=rt.id,
         attribute_schema=[
-            AttributeInput(
-                key="bad", label="X", data_type="enum",
-                required=False, enum_values=None,
-            ),
+            {"key": "size", "label": "A", "data_type": "string", "required": False, "enum_values": None},
+            {"key": "size", "label": "B", "data_type": "string", "required": False, "enum_values": None},
         ],
     ))
     assert r.is_failure
-    assert r.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_update_is_active_toggle():
-    repo = InMemoryResourceTypeRepository()
-    rt = _seed_rt(repo)
-    handler = UpdateResourceTypeHandler(repo)
-    r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name=None, description=None, attribute_schema=None,
-        is_active=False,
-    ))
-    assert r.is_success
-    assert r.value.is_active is False
-
-    r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name=None, description=None, attribute_schema=None,
-        is_active=True,
-    ))
-    assert r.is_success
-    assert r.value.is_active is True
-
-
-@pytest.mark.asyncio
-async def test_update_no_fields_provided_returns_400():
-    repo = InMemoryResourceTypeRepository()
-    rt = _seed_rt(repo)
-    handler = UpdateResourceTypeHandler(repo)
-    r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=rt.id,
-        name=None, description=None, attribute_schema=None, is_active=None,
-    ))
-    assert r.is_failure
-    assert r.status_code == 400
-    assert "campo" in r.error.lower() or "field" in r.error.lower()
-
-
-@pytest.mark.asyncio
-async def test_update_missing_resource_type_returns_404():
-    repo = InMemoryResourceTypeRepository()
-    handler = UpdateResourceTypeHandler(repo)
-    r = await handler.handle(UpdateResourceTypeCommand(
-        resource_type_id=uuid4(),
-        name="X", description=None, attribute_schema=None, is_active=None,
-    ))
-    assert r.is_failure
-    assert r.status_code == 404
-    assert "encontrad" in r.error.lower() or "not found" in r.error.lower()
+    assert "DuplicateAttributeKey" in r.error
 ```
 
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — fail**
 
-- [ ] **Step 3: Implement**
+```bash
+.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_update_resource_type.py -v
+```
+
+- [ ] **Step 3: Implementation**
 
 `app/use_cases/catalog/commands/update_resource_type.py`:
 
 ```python
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any, Protocol
 from uuid import UUID
-from app.domain.catalog.repository import IResourceTypeRepository
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.catalog.resource_type import ResourceType
 from app.domain.shared.result import Result
-from app.use_cases.catalog.commands.create_resource_type import (
-    AttributeInput, _build_attributes,
-)
 from app.use_cases.catalog.dtos import ResourceTypeDto
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+class _RepoLike(Protocol):
+    async def get_by_id(self, rt_id: UUID) -> ResourceType | None: ...
+    async def update(self, rt: ResourceType) -> Result[None]: ...
+
+
+@dataclass(frozen=True, slots=True)
 class UpdateResourceTypeCommand:
-    resource_type_id: UUID
-    name: str | None
-    description: str | None
-    attribute_schema: list[AttributeInput] | None
-    is_active: bool | None
+    id: UUID
+    name: str | None = None
+    description: str | None = None
+    attribute_schema: list[dict[str, Any]] | None = None
+    is_active: bool | None = None
 
 
 class UpdateResourceTypeHandler:
-    def __init__(self, repo: IResourceTypeRepository) -> None:
+    def __init__(self, repo: _RepoLike) -> None:
         self._repo = repo
 
     async def handle(self, cmd: UpdateResourceTypeCommand) -> Result[ResourceTypeDto]:
-        if (cmd.name is None and cmd.description is None
-                and cmd.attribute_schema is None and cmd.is_active is None):
-            return Result.failure(
-                "Nenhum campo enviado para atualização.",
-                status_code=400,
-            )
-
-        rt = await self._repo.get_by_id(cmd.resource_type_id)
+        rt = await self._repo.get_by_id(cmd.id)
         if rt is None:
-            return Result.failure(
-                f"ResourceType {cmd.resource_type_id} não encontrado.",
-                status_code=404,
-            )
+            return Result.failure("ResourceTypeNotFound", status_code=404)
 
         if cmd.name is not None or cmd.description is not None:
-            rt.update_metadata(
-                name=cmd.name if cmd.name is not None else rt.name,
-                description=cmd.description if cmd.description is not None else rt.description,
-            )
+            rt.update_metadata(name=cmd.name, description=cmd.description)
 
         if cmd.attribute_schema is not None:
-            attrs_r = _build_attributes(cmd.attribute_schema)
-            if attrs_r.is_failure:
-                return Result.failure(attrs_r.error, status_code=422)
-            replace_r = rt.replace_attribute_schema(attrs_r.value)
+            defs: list[AttributeDefinition] = []
+            errors: list[str] = []
+            for raw in cmd.attribute_schema:
+                try:
+                    dt = AttrType(raw["data_type"])
+                except ValueError:
+                    errors.append(f"InvalidDataType:{raw.get('data_type')!r}")
+                    continue
+                r = AttributeDefinition.create(
+                    key=raw["key"],
+                    label=raw["label"],
+                    data_type=dt,
+                    required=raw.get("required", False),
+                    enum_values=raw.get("enum_values"),
+                )
+                if r.is_failure:
+                    errors.append(r.error)
+                else:
+                    defs.append(r.value)
+            if errors:
+                return Result.failure("; ".join(errors), status_code=400)
+
+            replace_r = rt.replace_attribute_schema(defs)
             if replace_r.is_failure:
-                return Result.failure(replace_r.error, status_code=422)
+                return Result.failure(replace_r.error, status_code=400)
 
         if cmd.is_active is not None:
             if cmd.is_active:
@@ -2214,280 +2086,214 @@ class UpdateResourceTypeHandler:
             else:
                 rt.deactivate()
 
-        await self._repo.update(rt)
+        update_r = await self._repo.update(rt)
+        if update_r.is_failure:
+            return Result.failure(update_r.error, status_code=update_r.status_code or 500)
+
         return Result.success(ResourceTypeDto.from_entity(rt))
 ```
 
-- [ ] **Step 4: Run — expect PASS.**
+- [ ] **Step 4: Run — green**
 
 ```bash
-.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_update_resource_type.py -q
+.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_update_resource_type.py -v
+.venv/bin/pytest -q
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/use_cases/catalog/commands/update_resource_type.py tests/unit/use_cases/catalog/commands/test_update_resource_type.py
+git add app/use_cases/catalog/commands/update_resource_type.py \
+        tests/unit/use_cases/catalog/commands/test_update_resource_type.py
 git commit -m "$(cat <<'EOF'
-feat(catalog): add UpdateResourceTypeHandler
+feat(catalog): UpdateResourceTypeHandler
 
-Partial update — any field may be None (skip) or set (apply).
-Reuses _build_attributes from create_resource_type.py to translate
-AttributeInput → AttributeDefinition. attribute_schema is replaced
-wholesale (no per-key patching).
+Partial update: any field provided is updated, absent fields stay
+unchanged. attribute_schema is replaced wholesale per Decision 5
+(no per-key patching). Returns ResourceTypeNotFound (404) when the
+target id doesn't exist; propagates DuplicateAttributeKey or VO
+validation errors from replace_attribute_schema.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
+---
+
 ### Task C4 — `DeleteResourceTypeHandler`
 
 **Files:** `app/use_cases/catalog/commands/delete_resource_type.py`, `tests/unit/use_cases/catalog/commands/test_delete_resource_type.py`.
 
-Per Decision 6, this handler does NOT yet check whether `Resource` rows reference this type. A `# TODO(plan-04)` comment marks the gap.
-
-- [ ] **Step 1: Failing test**
-
-`tests/unit/use_cases/catalog/commands/test_delete_resource_type.py`:
+- [ ] **Step 1: Failing tests**
 
 ```python
 from __future__ import annotations
 from uuid import uuid4
 import pytest
+from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
 from app.use_cases.catalog.commands.delete_resource_type import (
-    DeleteResourceTypeCommand, DeleteResourceTypeHandler,
+    DeleteResourceTypeCommand,
+    DeleteResourceTypeHandler,
 )
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import (
     InMemoryResourceTypeRepository,
 )
 
 
-@pytest.mark.asyncio
-async def test_delete_existing_resource_type():
+pytestmark = pytest.mark.asyncio
+
+
+async def test_delete_resource_type_success():
     repo = InMemoryResourceTypeRepository()
     rt = ResourceType.create(
-        slug="x", name="X", description="", attribute_schema=[],
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
     ).value
-    repo._by_id[rt.id] = rt
+    await repo.add(rt)
     handler = DeleteResourceTypeHandler(repo)
-
-    r = await handler.handle(DeleteResourceTypeCommand(resource_type_id=rt.id))
+    r = await handler.handle(DeleteResourceTypeCommand(id=rt.id))
     assert r.is_success
-    assert await repo.get_by_id(rt.id) is None
+    assert (await repo.get_by_id(rt.id)) is None
 
 
-@pytest.mark.asyncio
-async def test_delete_missing_resource_type_returns_404():
+async def test_delete_returns_not_found_for_missing_id():
     repo = InMemoryResourceTypeRepository()
     handler = DeleteResourceTypeHandler(repo)
-    r = await handler.handle(DeleteResourceTypeCommand(resource_type_id=uuid4()))
+    r = await handler.handle(DeleteResourceTypeCommand(id=uuid4()))
     assert r.is_failure
-    assert r.status_code == 404
-    assert "encontrad" in r.error.lower() or "not found" in r.error.lower()
+    assert r.error == "ResourceTypeNotFound"
 ```
 
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — fail**
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implementation**
 
 `app/use_cases/catalog/commands/delete_resource_type.py`:
 
 ```python
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
-from app.domain.catalog.repository import IResourceTypeRepository
 from app.domain.shared.result import Result
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+class _RepoLike(Protocol):
+    async def delete(self, rt_id: UUID) -> Result[None]: ...
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteResourceTypeCommand:
-    resource_type_id: UUID
+    id: UUID
 
 
 class DeleteResourceTypeHandler:
-    """Hard-delete a ResourceType.
-
-    TODO(plan-04): inject IResourceRepository and reject deletion when
-    any Resource references this type (spec §5.2 invariant
-    "Deletion is allowed only if no Resource references the type").
-    Resource doesn't exist yet, so the check would be vacuous now.
-    """
-
-    def __init__(self, repo: IResourceTypeRepository) -> None:
+    def __init__(self, repo: _RepoLike) -> None:
         self._repo = repo
 
     async def handle(self, cmd: DeleteResourceTypeCommand) -> Result[None]:
-        existing = await self._repo.get_by_id(cmd.resource_type_id)
-        if existing is None:
-            return Result.failure(
-                f"ResourceType {cmd.resource_type_id} não encontrado.",
-                status_code=404,
-            )
-        await self._repo.delete(cmd.resource_type_id)
-        return Result.success(None)
+        # TODO(plan-06): inject IResourceRepository and check whether any Resource
+        # references this type. Spec §5.2: "Deletion is allowed only if no
+        # Resource references the type." Resource doesn't exist yet.
+        return await self._repo.delete(cmd.id)
 ```
 
-- [ ] **Step 4: Run — expect PASS.**
+- [ ] **Step 4: Run — green**
 
 ```bash
-.venv/bin/pytest tests/unit/use_cases/catalog/commands/test_delete_resource_type.py -q
+.venv/bin/pytest tests/unit/use_cases/catalog/commands/ -v
+.venv/bin/pytest -q
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/use_cases/catalog/commands/delete_resource_type.py tests/unit/use_cases/catalog/commands/test_delete_resource_type.py
+git add app/use_cases/catalog/commands/delete_resource_type.py \
+        tests/unit/use_cases/catalog/commands/test_delete_resource_type.py
 git commit -m "$(cat <<'EOF'
-feat(catalog): add DeleteResourceTypeHandler
+feat(catalog): DeleteResourceTypeHandler
 
-Hard-delete with a 404-style check for missing rows. The "blocked
-if Resource references this type" invariant from spec §5.2 is
-deferred to plan-04 (resources) — marked with TODO(plan-04) in the
-handler docstring.
+Hard-delete via repository. Returns ResourceTypeNotFound (404) for
+missing ids. The "blocked if referenced" invariant from spec §5.2
+is deferred to Plan 06 (resources) where IResourceRepository becomes
+available; a TODO marks the gap.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Unit C — verification before handoff
-
-- [ ] Run all unit tests for use cases.
-
-```bash
-.venv/bin/pytest tests/unit/use_cases/ -q
-```
-
-Expect: green.
-
-- [ ] Run ruff over the new use-case code.
-
-```bash
-.venv/bin/python -m ruff check app/use_cases/catalog tests/unit/use_cases/catalog
-```
-
-Expect: clean.
-
 ---
 
-## UNIT D — API layer + e2e
+## UNIT D — API + e2e
 
-### Task D1 — `app/api/v1/admin_resource_types/` (deps + schemas)
+### Task D1 — Pydantic schemas
 
-**Files:** `app/api/v1/admin_resource_types/__init__.py`, `app/api/v1/admin_resource_types/deps.py`, `app/api/v1/admin_resource_types/schemas.py`.
+**Files:** create `app/api/v1/admin_resource_types/__init__.py`, `app/api/v1/admin_resource_types/schemas.py`, `app/api/v1/catalog/__init__.py`, `app/api/v1/catalog/schemas.py`.
 
-- [ ] **Step 1: Implement deps**
+- [ ] **Step 1: Create empty `__init__.py`s**
 
-`app/api/v1/admin_resource_types/__init__.py`:
-
-```python
-from app.api.v1.admin_resource_types.routes import router
-
-__all__ = ["router"]
+```bash
+mkdir -p app/api/v1/admin_resource_types
+mkdir -p app/api/v1/catalog
+touch app/api/v1/admin_resource_types/__init__.py
+touch app/api/v1/catalog/__init__.py
 ```
 
-`app/api/v1/admin_resource_types/deps.py`:
-
-```python
-from __future__ import annotations
-from typing import Annotated
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.domain.catalog.repository import IResourceTypeRepository
-from app.infrastructure.db.session import get_session
-from app.infrastructure.repositories.resource_type_repository import (
-    ResourceTypeRepository,
-)
-from app.use_cases.catalog.commands.create_resource_type import CreateResourceTypeHandler
-from app.use_cases.catalog.commands.delete_resource_type import DeleteResourceTypeHandler
-from app.use_cases.catalog.commands.update_resource_type import UpdateResourceTypeHandler
-
-
-def get_resource_type_repository(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> IResourceTypeRepository:
-    return ResourceTypeRepository(session)
-
-
-ResourceTypeRepo = Annotated[IResourceTypeRepository, Depends(get_resource_type_repository)]
-
-
-def get_create_resource_type_handler(repo: ResourceTypeRepo) -> CreateResourceTypeHandler:
-    return CreateResourceTypeHandler(repo)
-
-
-def get_update_resource_type_handler(repo: ResourceTypeRepo) -> UpdateResourceTypeHandler:
-    return UpdateResourceTypeHandler(repo)
-
-
-def get_delete_resource_type_handler(repo: ResourceTypeRepo) -> DeleteResourceTypeHandler:
-    return DeleteResourceTypeHandler(repo)
-```
+- [ ] **Step 2: Admin schemas**
 
 `app/api/v1/admin_resource_types/schemas.py`:
 
 ```python
 from __future__ import annotations
 from datetime import datetime
-from typing import Literal, Self
+from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
-from app.use_cases.catalog.commands.create_resource_type import AttributeInput
-from app.use_cases.catalog.dtos import AttributeDefinitionDto, ResourceTypeDto
+from app.use_cases.catalog.dtos import ResourceTypeDto
 
 
-AttrTypeLiteral = Literal["string", "int", "bool", "enum"]
+_DataType = Literal["string", "int", "bool", "enum"]
 
 
 class AttributeDefinitionPayload(BaseModel):
-    """Inbound + outbound shape for an attribute_schema entry."""
+    """Wire format for an attribute definition. VOs own length validation;
+    no max_length on key/label here."""
     model_config = ConfigDict(extra="forbid")
 
-    key: str = Field(..., min_length=1, max_length=64)
-    label: str = Field(..., min_length=1, max_length=200)
-    data_type: AttrTypeLiteral
-    required: bool
+    key: str
+    label: str
+    data_type: _DataType
+    required: bool = False
     enum_values: list[str] | None = None
-
-    def to_input(self) -> AttributeInput:
-        return AttributeInput(
-            key=self.key,
-            label=self.label,
-            data_type=self.data_type,
-            required=self.required,
-            enum_values=self.enum_values,
-        )
-
-    @classmethod
-    def from_dto(cls, a: AttributeDefinitionDto) -> Self:
-        return cls(
-            key=a.key, label=a.label, data_type=a.data_type,  # type: ignore[arg-type]
-            required=a.required,
-            enum_values=list(a.enum_values) if a.enum_values is not None else None,
-        )
 
 
 class CreateResourceTypeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slug: str = Field(..., min_length=2, max_length=80)
-    name: str = Field(..., min_length=1, max_length=200)
-    description: str = Field("", max_length=1000)
+    slug: str
+    name: str
+    description: str = ""
     attribute_schema: list[AttributeDefinitionPayload] = Field(default_factory=list)
+    is_active: bool = True
 
 
 class UpdateResourceTypeRequest(BaseModel):
-    """All fields optional. Caller must send at least one."""
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = Field(None, min_length=1, max_length=200)
-    description: str | None = Field(None, max_length=1000)
+    name: str | None = None
+    description: str | None = None
     attribute_schema: list[AttributeDefinitionPayload] | None = None
     is_active: bool | None = None
+
+
+class AttributeDefinitionResponse(BaseModel):
+    key: str
+    label: str
+    data_type: _DataType
+    required: bool
+    enum_values: list[str] | None = None
 
 
 class ResourceTypeResponse(BaseModel):
@@ -2495,20 +2301,24 @@ class ResourceTypeResponse(BaseModel):
     slug: str
     name: str
     description: str
-    attribute_schema: list[AttributeDefinitionPayload]
+    attribute_schema: list[AttributeDefinitionResponse]
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def from_dto(cls, dto: ResourceTypeDto) -> Self:
+    def from_dto(cls, dto: ResourceTypeDto) -> "ResourceTypeResponse":
         return cls(
             id=dto.id,
             slug=dto.slug,
             name=dto.name,
             description=dto.description,
             attribute_schema=[
-                AttributeDefinitionPayload.from_dto(a) for a in dto.attribute_schema
+                AttributeDefinitionResponse(
+                    key=a.key, label=a.label, data_type=a.data_type,  # type: ignore[arg-type]
+                    required=a.required, enum_values=a.enum_values,
+                )
+                for a in dto.attribute_schema
             ],
             is_active=dto.is_active,
             created_at=dto.created_at,
@@ -2516,52 +2326,129 @@ class ResourceTypeResponse(BaseModel):
         )
 
 
-class ListResourceTypesResponse(BaseModel):
+class ResourceTypeListResponse(BaseModel):
     items: list[ResourceTypeResponse]
+    limit: int
+    offset: int
 ```
 
-- [ ] **Step 2: Verify imports**
+- [ ] **Step 3: Public schemas**
+
+`app/api/v1/catalog/schemas.py`:
+
+```python
+from __future__ import annotations
+from app.api.v1.admin_resource_types.schemas import (
+    ResourceTypeResponse,
+    ResourceTypeListResponse,
+)
+
+# Public storefront uses the same response shape — no admin-only fields exposed
+# yet (is_active is implicit since public listings filter to active only).
+__all__ = ["ResourceTypeResponse", "ResourceTypeListResponse"]
+```
+
+- [ ] **Step 4: Smoke import**
 
 ```bash
-.venv/bin/python -c "from app.api.v1.admin_resource_types.deps import get_create_resource_type_handler; print('ok')"
-.venv/bin/python -c "from app.api.v1.admin_resource_types.schemas import ResourceTypeResponse; print('ok')"
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "
+from app.api.v1.admin_resource_types.schemas import (
+    CreateResourceTypeRequest, UpdateResourceTypeRequest, ResourceTypeResponse,
+)
+from app.api.v1.catalog.schemas import ResourceTypeListResponse
+print('schemas loaded')
+"
 ```
 
-Expect: `ok` on each.
+- [ ] **Step 5: Commit**
 
-- [ ] **Step 3: Commit (no commit yet — routes.py is missing; commit at end of D2)**
+```bash
+git add app/api/v1/admin_resource_types/ app/api/v1/catalog/
+git commit -m "$(cat <<'EOF'
+feat(catalog): add Pydantic schemas (admin + public)
 
-(Skip — combined commit at end of D2.)
+Request/response models for admin CRUD and the public catalog
+listing. No max_length on VO-backed fields (slug/name/description/
+key/label) per spec §3 decision 17. extra="forbid" on requests so
+unknown fields are rejected at the boundary.
 
-### Task D2 — Admin routes (`POST/GET/PATCH/DELETE /v1/admin/resource-types`)
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
 
-**Files:** `app/api/v1/admin_resource_types/routes.py`.
+---
 
-- [ ] **Step 1: Implement**
+### Task D2 — Admin routes
+
+`POST/GET/PATCH/DELETE /v1/admin/resource-types`. Reuses `require_role(Role.ADMIN)` from `app/api/deps.py` and the unwrap pattern from Plan 02.
+
+**Files:** create `app/api/v1/admin_resource_types/deps.py`, `app/api/v1/admin_resource_types/routes.py`, modify `app/api/v1/router.py`.
+
+- [ ] **Step 1: DI deps**
+
+`app/api/v1/admin_resource_types/deps.py`:
+
+```python
+from __future__ import annotations
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.deps import get_db_session
+from app.infrastructure.repositories.resource_type_repository import (
+    SQLAlchemyResourceTypeRepository,
+)
+from app.use_cases.catalog.commands.create_resource_type import CreateResourceTypeHandler
+from app.use_cases.catalog.commands.delete_resource_type import DeleteResourceTypeHandler
+from app.use_cases.catalog.commands.update_resource_type import UpdateResourceTypeHandler
+
+
+async def get_resource_type_repo(
+    session: AsyncSession = Depends(get_db_session),
+) -> SQLAlchemyResourceTypeRepository:
+    return SQLAlchemyResourceTypeRepository(session)
+
+
+async def get_create_handler(
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+) -> CreateResourceTypeHandler:
+    return CreateResourceTypeHandler(repo)
+
+
+async def get_update_handler(
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+) -> UpdateResourceTypeHandler:
+    return UpdateResourceTypeHandler(repo)
+
+
+async def get_delete_handler(
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+) -> DeleteResourceTypeHandler:
+    return DeleteResourceTypeHandler(repo)
+```
+
+If `get_db_session` doesn't exist at `app/api/deps.py`, look at how `admin_users/routes.py` from Plan 02 acquires its session. Match that pattern.
+
+- [ ] **Step 2: Routes**
 
 `app/api/v1/admin_resource_types/routes.py`:
 
 ```python
 from __future__ import annotations
-from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query
-
 from app.api.deps import require_role
 from app.api.error_handler import unwrap
 from app.api.v1.admin_resource_types.deps import (
-    ResourceTypeRepo,
-    get_create_resource_type_handler,
-    get_delete_resource_type_handler,
-    get_update_resource_type_handler,
+    get_create_handler, get_delete_handler, get_resource_type_repo, get_update_handler,
 )
 from app.api.v1.admin_resource_types.schemas import (
     CreateResourceTypeRequest,
-    ListResourceTypesResponse,
+    ResourceTypeListResponse,
     ResourceTypeResponse,
     UpdateResourceTypeRequest,
 )
 from app.domain.accounts.role import Role
+from app.infrastructure.repositories.resource_type_repository import SQLAlchemyResourceTypeRepository
 from app.use_cases.catalog.commands.create_resource_type import (
     CreateResourceTypeCommand, CreateResourceTypeHandler,
 )
@@ -2575,328 +2462,207 @@ from app.use_cases.catalog.dtos import ResourceTypeDto
 
 
 router = APIRouter(
-    prefix="/v1/admin/resource-types",
-    tags=["admin", "catalog"],
+    prefix="/admin/resource-types",
+    tags=["admin:catalog"],
     dependencies=[Depends(require_role(Role.ADMIN))],
 )
 
 
 @router.post("", response_model=ResourceTypeResponse, status_code=201)
 async def create_resource_type(
-    req: CreateResourceTypeRequest,
-    handler: Annotated[CreateResourceTypeHandler, Depends(get_create_resource_type_handler)],
-) -> ResourceTypeResponse:
-    dto: ResourceTypeDto = unwrap(await handler.handle(CreateResourceTypeCommand(
-        slug=req.slug,
-        name=req.name,
-        description=req.description,
-        attribute_schema=[a.to_input() for a in req.attribute_schema],
-    )))
-    return ResourceTypeResponse.from_dto(dto)
-
-
-@router.get("", response_model=ListResourceTypesResponse)
-async def list_resource_types(
-    repo: ResourceTypeRepo,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-) -> ListResourceTypesResponse:
-    rows = await repo.list(limit=limit, offset=offset, only_active=False)
-    items = [ResourceTypeResponse.from_dto(ResourceTypeDto.from_entity(rt)) for rt in rows]
-    return ListResourceTypesResponse(items=items)
-
-
-@router.patch("/{resource_type_id}", response_model=ResourceTypeResponse)
-async def update_resource_type(
-    resource_type_id: UUID,
-    req: UpdateResourceTypeRequest,
-    handler: Annotated[UpdateResourceTypeHandler, Depends(get_update_resource_type_handler)],
-) -> ResourceTypeResponse:
-    cmd = UpdateResourceTypeCommand(
-        resource_type_id=resource_type_id,
-        name=req.name,
-        description=req.description,
-        attribute_schema=(
-            [a.to_input() for a in req.attribute_schema]
-            if req.attribute_schema is not None else None
-        ),
-        is_active=req.is_active,
+    body: CreateResourceTypeRequest,
+    handler: CreateResourceTypeHandler = Depends(get_create_handler),
+):
+    cmd = CreateResourceTypeCommand(
+        slug=body.slug,
+        name=body.name,
+        description=body.description,
+        attribute_schema=[a.model_dump() for a in body.attribute_schema],
+        is_active=body.is_active,
     )
     dto: ResourceTypeDto = unwrap(await handler.handle(cmd))
     return ResourceTypeResponse.from_dto(dto)
 
 
-@router.delete("/{resource_type_id}", status_code=204)
+@router.get("", response_model=ResourceTypeListResponse)
+async def list_resource_types(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+):
+    rows = await repo.list_all(limit=limit, offset=offset)
+    return ResourceTypeListResponse(
+        items=[ResourceTypeResponse.from_dto(ResourceTypeDto.from_entity(rt)) for rt in rows],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{rt_id}", response_model=ResourceTypeResponse)
+async def get_resource_type(
+    rt_id: UUID,
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+):
+    rt = await repo.get_by_id(rt_id)
+    if rt is None:
+        from fastapi import HTTPException
+        from app.api.error_codes import translate
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "ResourceTypeNotFound", "message": translate("ResourceTypeNotFound")},
+        )
+    return ResourceTypeResponse.from_dto(ResourceTypeDto.from_entity(rt))
+
+
+@router.patch("/{rt_id}", response_model=ResourceTypeResponse)
+async def update_resource_type(
+    rt_id: UUID,
+    body: UpdateResourceTypeRequest,
+    handler: UpdateResourceTypeHandler = Depends(get_update_handler),
+):
+    cmd = UpdateResourceTypeCommand(
+        id=rt_id,
+        name=body.name,
+        description=body.description,
+        attribute_schema=(
+            [a.model_dump() for a in body.attribute_schema]
+            if body.attribute_schema is not None
+            else None
+        ),
+        is_active=body.is_active,
+    )
+    dto = unwrap(await handler.handle(cmd))
+    return ResourceTypeResponse.from_dto(dto)
+
+
+@router.delete("/{rt_id}", status_code=204)
 async def delete_resource_type(
-    resource_type_id: UUID,
-    handler: Annotated[DeleteResourceTypeHandler, Depends(get_delete_resource_type_handler)],
-) -> None:
-    unwrap(await handler.handle(DeleteResourceTypeCommand(
-        resource_type_id=resource_type_id,
-    )))
+    rt_id: UUID,
+    handler: DeleteResourceTypeHandler = Depends(get_delete_handler),
+):
+    unwrap(await handler.handle(DeleteResourceTypeCommand(id=rt_id)))
+    return None
 ```
 
-- [ ] **Step 2: Verify the router imports cleanly**
+- [ ] **Step 3: Register in `app/api/v1/router.py`**
 
-```bash
-.venv/bin/python -c "from app.api.v1.admin_resource_types import router; print(router.routes)"
+Read the current router file. Add an import + include for the admin_resource_types router. Pattern matches the existing `admin_users` registration.
+
+```python
+from app.api.v1.admin_resource_types.routes import router as admin_resource_types_router
+# ...
+api_router.include_router(admin_resource_types_router)
 ```
 
-Expect: a list of 4 routes (POST, GET, PATCH, DELETE).
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Smoke import + run full suite**
 
 ```bash
-git add app/api/v1/admin_resource_types/
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "from app.main import app; print('ok')"
+.venv/bin/pytest -q
+```
+
+Expected: green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/api/v1/admin_resource_types/deps.py \
+        app/api/v1/admin_resource_types/routes.py \
+        app/api/v1/router.py
 git commit -m "$(cat <<'EOF'
-feat(api): add /v1/admin/resource-types CRUD routes
+feat(catalog): admin CRUD routes for resource-types
 
-Admin-guarded endpoints for managing the catalog. Pydantic schemas
-forbid extra fields; AttributeDefinitionPayload mirrors the domain
-VO so the API contract is the canonical wire format.
-
-POST returns 201 + body, PATCH/GET return 200 + body, DELETE returns
-204 + empty.
+POST/GET/PATCH/DELETE /v1/admin/resource-types behind the
+require_role(Role.ADMIN) guard. List endpoint paginates with limit
+(1..100) + offset. Detail endpoint returns 404 with the
+ResourceTypeNotFound code when the id is missing. Mutation paths
+go through CreateResourceType/UpdateResourceType/DeleteResource
+TypeHandler and unwrap their Result to {code, message} on failure.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Task D3 — Public route (`GET /v1/catalog/resource-types`) + wire routers
+---
 
-**Files:** `app/api/v1/catalog/__init__.py`, `app/api/v1/catalog/routes.py`, `app/api/v1/catalog/schemas.py`, `app/api/v1/router.py` (modify).
+### Task D3 — Public route
 
-The public route shows ONLY active resource types and reuses a thinner response (no `is_active`, no `created_at`/`updated_at` — the public shape doesn't need them).
+`GET /v1/catalog/resource-types`. No auth. Active rows only.
 
-- [ ] **Step 1: Implement schemas**
+**Files:** create `app/api/v1/catalog/routes.py`, modify `app/api/v1/router.py`.
 
-`app/api/v1/catalog/__init__.py`:
-
-```python
-from app.api.v1.catalog.routes import router
-
-__all__ = ["router"]
-```
-
-`app/api/v1/catalog/schemas.py`:
-
-```python
-from __future__ import annotations
-from typing import Self
-from uuid import UUID
-from pydantic import BaseModel
-from app.use_cases.catalog.dtos import ResourceTypeDto
-from app.api.v1.admin_resource_types.schemas import AttributeDefinitionPayload
-
-
-class PublicResourceTypeResponse(BaseModel):
-    """Slimmed-down view of a ResourceType for public/storefront consumers."""
-    id: UUID
-    slug: str
-    name: str
-    description: str
-    attribute_schema: list[AttributeDefinitionPayload]
-
-    @classmethod
-    def from_dto(cls, dto: ResourceTypeDto) -> Self:
-        return cls(
-            id=dto.id,
-            slug=dto.slug,
-            name=dto.name,
-            description=dto.description,
-            attribute_schema=[
-                AttributeDefinitionPayload.from_dto(a) for a in dto.attribute_schema
-            ],
-        )
-
-
-class PublicListResourceTypesResponse(BaseModel):
-    items: list[PublicResourceTypeResponse]
-```
-
-- [ ] **Step 2: Implement routes**
+- [ ] **Step 1: Routes**
 
 `app/api/v1/catalog/routes.py`:
 
 ```python
 from __future__ import annotations
-from fastapi import APIRouter, Query
-
-from app.api.v1.admin_resource_types.deps import ResourceTypeRepo
-from app.api.v1.catalog.schemas import (
-    PublicListResourceTypesResponse, PublicResourceTypeResponse,
-)
+from fastapi import APIRouter, Depends, Query
+from app.api.v1.admin_resource_types.deps import get_resource_type_repo
+from app.api.v1.admin_resource_types.schemas import ResourceTypeResponse
+from app.api.v1.catalog.schemas import ResourceTypeListResponse
+from app.infrastructure.repositories.resource_type_repository import SQLAlchemyResourceTypeRepository
 from app.use_cases.catalog.dtos import ResourceTypeDto
 
 
-router = APIRouter(prefix="/v1/catalog", tags=["catalog"])
+router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 
-@router.get("/resource-types", response_model=PublicListResourceTypesResponse)
+@router.get("/resource-types", response_model=ResourceTypeListResponse)
 async def list_active_resource_types(
-    repo: ResourceTypeRepo,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-) -> PublicListResourceTypesResponse:
-    rows = await repo.list(limit=limit, offset=offset, only_active=True)
-    items = [PublicResourceTypeResponse.from_dto(ResourceTypeDto.from_entity(rt)) for rt in rows]
-    return PublicListResourceTypesResponse(items=items)
+    repo: SQLAlchemyResourceTypeRepository = Depends(get_resource_type_repo),
+):
+    rows = await repo.list_active(limit=limit, offset=offset)
+    return ResourceTypeListResponse(
+        items=[ResourceTypeResponse.from_dto(ResourceTypeDto.from_entity(rt)) for rt in rows],
+        limit=limit,
+        offset=offset,
+    )
 ```
 
-- [ ] **Step 3: Wire both routers into `app/api/v1/router.py`**
-
-Read the current state of the file first:
-
-```bash
-.venv/bin/python -c "
-with open('app/api/v1/router.py') as f:
-    print(f.read())
-"
-```
-
-Currently it should have (from Plan 02):
+- [ ] **Step 2: Register in `app/api/v1/router.py`**
 
 ```python
-from app.api.v1.admin_users import router as admin_users_router
-from app.api.v1.auth import router as auth_router
-...
-api_router.include_router(auth_router)
-api_router.include_router(admin_users_router)
-```
-
-Add the catalog routers in the same alphabetical-ish order. The final imports + `include_router` calls should be:
-
-```python
-from app.api.v1.admin_resource_types import router as admin_resource_types_router
-from app.api.v1.admin_users import router as admin_users_router
-from app.api.v1.auth import router as auth_router
-from app.api.v1.catalog import router as catalog_router
-
-api_router.include_router(auth_router)
-api_router.include_router(admin_users_router)
-api_router.include_router(admin_resource_types_router)
+from app.api.v1.catalog.routes import router as catalog_router
+# ...
 api_router.include_router(catalog_router)
 ```
 
-(The exact existing arrangement may differ slightly — keep the existing two routers in their current positions and just add the two new lines. Don't reorder unrelated lines.)
-
-- [ ] **Step 4: Smoke test that the app boots**
-
-```bash
-BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" \
-  .venv/bin/python -c "
-from app.main import app
-routes = sorted(r.path for r in app.routes if hasattr(r, 'path'))
-catalog_routes = [r for r in routes if 'catalog' in r or 'resource-types' in r]
-for r in catalog_routes:
-    print(r)
-"
-```
-
-Expect output:
-```
-/v1/admin/resource-types
-/v1/admin/resource-types/{resource_type_id}
-/v1/catalog/resource-types
-```
-
-- [ ] **Step 5: Run the FULL test suite to confirm nothing regressed**
+- [ ] **Step 3: Run full suite**
 
 ```bash
 .venv/bin/pytest -q
 ```
 
-Expect: green.
+Expected: green.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add app/api/v1/catalog/ app/api/v1/router.py
+git add app/api/v1/catalog/routes.py app/api/v1/router.py
 git commit -m "$(cat <<'EOF'
-feat(api): add public GET /v1/catalog/resource-types + wire routers
+feat(catalog): public listing endpoint
 
-Public listing returns only active types and uses a slimmed-down
-response shape (no is_active, no timestamps). Both the admin and
-public routers are now registered in the v1 api router.
+GET /v1/catalog/resource-types — no auth, returns only is_active=True
+rows, paginated. Powers the storefront filter UI.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Task D4 — End-to-end tests
+---
 
-**Files:** `tests/e2e/catalog/__init__.py` (empty), `tests/e2e/catalog/conftest.py`, `tests/e2e/catalog/test_admin_and_public_flow.py`.
+### Task D4 — End-to-end flow test
 
-To exercise admin endpoints we need an admin token. Accounts only allows OWNER/CUSTOMER to self-register, so we seed an admin directly in the DB via the same sessionmaker that the `client` fixture wired up.
+Admin creates → public sees → admin updates → admin deletes → public no longer sees.
 
-**Important fixture wiring detail:** `tests/e2e/conftest.py`'s `client` fixture sets `app.infrastructure.db.session._sessionmaker` to a real sessionmaker that points at the per-test in-memory SQLite engine. The `client` fixture also sets `_engine` and tears both down at the end. The `admin_token` fixture below depends on `client` (so the engine is already set up) and pulls a session out of that same sessionmaker.
+**Files:** create `tests/e2e/catalog/__init__.py`, `tests/e2e/catalog/test_admin_and_public_flow.py`.
 
-The fixture also re-uses the existing `JoseJwtService.issue(...)` rather than constructing tokens manually — that path is already exercised by Plan 02's e2e tests, so it's known good.
-
-- [ ] **Step 1: Implement the conftest**
-
-`tests/e2e/catalog/__init__.py`: empty.
-
-`tests/e2e/catalog/conftest.py`:
-
-```python
-from __future__ import annotations
-import pytest_asyncio
-
-from app.core.config import get_settings
-from app.domain.accounts.role import Role
-from app.domain.accounts.user import User
-from app.infrastructure.auth.argon2_password_hasher import Argon2PasswordHasher
-from app.infrastructure.auth.jose_jwt_service import JoseJwtService
-from app.infrastructure.db import session as session_mod
-from app.infrastructure.repositories.user_repository import UserRepository
-
-
-@pytest_asyncio.fixture
-async def admin_token(client) -> str:
-    """Seed an admin user directly in the DB and mint a fresh access token.
-
-    Depends on `client` so that `session_mod._sessionmaker` is wired to the
-    per-test in-memory engine.
-    """
-    s = get_settings()
-    hasher = Argon2PasswordHasher(
-        time_cost=s.argon2_time_cost,
-        memory_cost_kib=s.argon2_memory_cost_kib,
-        parallelism=s.argon2_parallelism,
-    )
-    user_r = User.create(
-        email="admin@example.com",
-        password_hash=hasher.hash("irrelevant-since-we-mint-a-token"),
-        role=Role.ADMIN,
-        full_name="Root Admin",
-        phone=None,
-    )
-    user = user_r.value
-
-    assert session_mod._sessionmaker is not None, (
-        "client fixture must run first to wire the sessionmaker"
-    )
-    async with session_mod._sessionmaker() as db:
-        repo = UserRepository(db)
-        await repo.add(user)
-        await db.commit()
-
-    jwt_svc = JoseJwtService(
-        secret_key=s.jwt_secret_key.get_secret_value(),
-        algorithm=s.jwt_algorithm,
-        access_token_expires_seconds=s.jwt_access_token_expires_minutes * 60,
-        refresh_token_expires_seconds=s.jwt_refresh_token_expires_days * 24 * 3600,
-    )
-    pair = jwt_svc.issue_pair(user_id=user.id, role=user.role)
-    return pair.access_token
-```
-
-(The method is `issue_pair`, not `issue` — verified against `app/infrastructure/auth/jose_jwt_service.py:27` and `app/use_cases/accounts/commands/login.py:49`. The return type is `TokenPair` with `.access_token` and `.refresh_token` attributes.)
-
-- [ ] **Step 2: Implement the e2e tests**
+- [ ] **Step 1: e2e test**
 
 `tests/e2e/catalog/test_admin_and_public_flow.py`:
 
@@ -2905,293 +2671,208 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.asyncio
-async def test_admin_create_list_get_update_delete_flow(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
+pytestmark = pytest.mark.asyncio
 
-    # Create
-    r = await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "football-field",
-        "name": "Campo de Futebol",
-        "description": "Campo gramado.",
-        "attribute_schema": [
-            {"key": "surface", "label": "Piso", "data_type": "string",
-             "required": True, "enum_values": None},
-            {"key": "lighting", "label": "Iluminação", "data_type": "enum",
-             "required": False, "enum_values": ["natural", "artificial"]},
-        ],
-    })
-    assert r.status_code == 201, r.text
-    body = r.json()
+
+async def test_admin_creates_resource_type_then_public_sees_it(http_client, admin_token):
+    # Admin creates
+    create = await http_client.post(
+        "/api/v1/admin/resource-types",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "slug": "football-field",
+            "name": "Football Field",
+            "description": "Campos de futebol",
+            "attribute_schema": [
+                {"key": "surface", "label": "Tipo de gramado", "data_type": "enum",
+                 "required": True, "enum_values": ["natural", "synthetic"]},
+            ],
+            "is_active": True,
+        },
+    )
+    assert create.status_code == 201, create.text
+    body = create.json()
     rt_id = body["id"]
     assert body["slug"] == "football-field"
-    assert body["is_active"] is True
-    assert len(body["attribute_schema"]) == 2
 
-    # Admin list — sees the row
-    r = await client.get("/v1/admin/resource-types", headers=headers)
-    assert r.status_code == 200, r.text
-    items = r.json()["items"]
-    assert any(i["id"] == rt_id for i in items)
+    # Public sees it
+    public_list = await http_client.get("/api/v1/catalog/resource-types")
+    assert public_list.status_code == 200
+    items = public_list.json()["items"]
+    assert any(item["slug"] == "football-field" for item in items)
 
-    # PATCH — change name + deactivate
-    r = await client.patch(f"/v1/admin/resource-types/{rt_id}", headers=headers, json={
-        "name": "Campo Society",
-        "is_active": False,
-    })
-    assert r.status_code == 200, r.text
-    assert r.json()["name"] == "Campo Society"
-    assert r.json()["is_active"] is False
+    # Admin deactivates
+    patch = await http_client.patch(
+        f"/api/v1/admin/resource-types/{rt_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"is_active": False},
+    )
+    assert patch.status_code == 200
 
-    # Public listing — should NOT see the now-inactive row
-    r = await client.get("/v1/catalog/resource-types")
-    assert r.status_code == 200, r.text
-    public_items = r.json()["items"]
-    assert all(i["id"] != rt_id for i in public_items)
-
-    # Re-activate, public sees it
-    r = await client.patch(f"/v1/admin/resource-types/{rt_id}", headers=headers,
-                           json={"is_active": True})
-    assert r.status_code == 200
-    r = await client.get("/v1/catalog/resource-types")
-    assert any(i["id"] == rt_id for i in r.json()["items"])
-
-    # DELETE
-    r = await client.delete(f"/v1/admin/resource-types/{rt_id}", headers=headers)
-    assert r.status_code == 204
-
-    # Confirmed gone — admin list no longer includes it
-    r = await client.get("/v1/admin/resource-types", headers=headers)
-    assert r.status_code == 200
-    assert all(i["id"] != rt_id for i in r.json()["items"])
+    # Public no longer sees it
+    public_list_after = await http_client.get("/api/v1/catalog/resource-types")
+    assert public_list_after.status_code == 200
+    items_after = public_list_after.json()["items"]
+    assert not any(item["slug"] == "football-field" for item in items_after)
 
 
-@pytest.mark.asyncio
-async def test_admin_endpoints_require_admin_role(client):
-    # Register a customer; their token must NOT work on admin endpoints
-    await client.post("/v1/auth/register", json={
-        "email": "cust@example.com", "password": "hunter2-strong",
-        "role": "customer", "full_name": "Cust", "phone": None,
-    })
-    r = await client.post("/v1/auth/login", json={
-        "email": "cust@example.com", "password": "hunter2-strong",
-    })
-    customer_token = r.json()["access_token"]
+async def test_admin_create_rejects_duplicate_slug(http_client, admin_token):
+    payload = {
+        "slug": "padel-court",
+        "name": "Padel Court",
+        "description": "",
+        "attribute_schema": [],
+    }
+    first = await http_client.post(
+        "/api/v1/admin/resource-types",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json=payload,
+    )
+    assert first.status_code == 201
 
-    r = await client.post(
-        "/v1/admin/resource-types",
+    second = await http_client.post(
+        "/api/v1/admin/resource-types",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={**payload, "name": "Other Padel Court"},
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "SlugAlreadyTaken"
+
+
+async def test_public_listing_no_auth_required(http_client):
+    response = await http_client.get("/api/v1/catalog/resource-types")
+    assert response.status_code == 200
+
+
+async def test_admin_create_rejects_non_admin_role(http_client, customer_token):
+    response = await http_client.post(
+        "/api/v1/admin/resource-types",
         headers={"Authorization": f"Bearer {customer_token}"},
         json={"slug": "x", "name": "X", "description": "", "attribute_schema": []},
     )
-    assert r.status_code == 403
+    assert response.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_admin_endpoints_require_token(client):
-    # No Authorization header — 401
-    r = await client.get("/v1/admin/resource-types")
-    assert r.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_create_duplicate_slug_returns_409(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    payload = {"slug": "dup", "name": "Dup", "description": "", "attribute_schema": []}
-    r1 = await client.post("/v1/admin/resource-types", headers=headers, json=payload)
-    assert r1.status_code == 201
-    r2 = await client.post("/v1/admin/resource-types", headers=headers, json=payload)
-    assert r2.status_code == 409
-    assert "slug" in r2.text.lower() or "dup" in r2.text.lower()
-
-
-@pytest.mark.asyncio
-async def test_create_invalid_attribute_schema_422(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    # Pydantic-level rejection: data_type must be a literal we declared
-    r = await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "x", "name": "X", "description": "",
-        "attribute_schema": [
-            {"key": "k", "label": "L", "data_type": "float",
-             "required": True, "enum_values": None},
-        ],
-    })
-    assert r.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_create_enum_without_values_returns_422(client, admin_token):
-    """Pydantic accepts data_type='enum' (it's in the literal); the
-    handler-level validation catches the missing enum_values and
-    returns 422 (semantic validation failure)."""
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    r = await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "x", "name": "X", "description": "",
-        "attribute_schema": [
-            {"key": "k", "label": "L", "data_type": "enum",
-             "required": False, "enum_values": None},
-        ],
-    })
-    assert r.status_code == 422
-    assert "enum" in r.text.lower()
-
-
-@pytest.mark.asyncio
-async def test_delete_missing_resource_type_returns_404(client, admin_token):
-    from uuid import uuid4
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    r = await client.delete(f"/v1/admin/resource-types/{uuid4()}", headers=headers)
-    assert r.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_update_no_fields_returns_400(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    # First create something to PATCH
-    r = await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "patchable", "name": "X", "description": "", "attribute_schema": [],
-    })
-    rt_id = r.json()["id"]
-    r = await client.patch(f"/v1/admin/resource-types/{rt_id}", headers=headers, json={})
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_update_missing_resource_type_returns_404(client, admin_token):
-    from uuid import uuid4
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    r = await client.patch(
-        f"/v1/admin/resource-types/{uuid4()}",
-        headers=headers, json={"name": "X"},
+async def test_admin_create_propagates_slug_validation_error(http_client, admin_token):
+    response = await http_client.post(
+        "/api/v1/admin/resource-types",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "slug": "Invalid Slug!",
+            "name": "Foo",
+            "description": "",
+            "attribute_schema": [],
+        },
     )
-    assert r.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_public_list_excludes_inactive(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    # Two types, one deactivated
-    await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "active-one", "name": "A", "description": "", "attribute_schema": [],
-    })
-    r = await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "inactive-one", "name": "I", "description": "", "attribute_schema": [],
-    })
-    inactive_id = r.json()["id"]
-    await client.patch(f"/v1/admin/resource-types/{inactive_id}",
-                       headers=headers, json={"is_active": False})
-
-    r = await client.get("/v1/catalog/resource-types")
-    slugs = [i["slug"] for i in r.json()["items"]]
-    assert "active-one" in slugs
-    assert "inactive-one" not in slugs
-
-
-@pytest.mark.asyncio
-async def test_public_list_response_shape(client, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    await client.post("/v1/admin/resource-types", headers=headers, json={
-        "slug": "shape-test", "name": "Shape", "description": "",
-        "attribute_schema": [],
-    })
-    r = await client.get("/v1/catalog/resource-types")
-    assert r.status_code == 200
-    item = next(i for i in r.json()["items"] if i["slug"] == "shape-test")
-    # Public response must NOT leak the admin-only fields
-    assert "is_active" not in item
-    assert "created_at" not in item
-    assert "updated_at" not in item
-    # But carries the slim admin/public-shared shape
-    assert set(item.keys()) == {"id", "slug", "name", "description", "attribute_schema"}
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "SlugInvalidFormat" in detail["code"]
 ```
 
-- [ ] **Step 3: Run the e2e suite — expect green**
+The fixtures `http_client`, `admin_token`, `customer_token` should already exist in `tests/e2e/conftest.py` from Plan 02. If `customer_token` isn't there, add it to that conftest using the same pattern as `admin_token`.
+
+- [ ] **Step 2: Run e2e**
 
 ```bash
-.venv/bin/pytest tests/e2e/catalog/ -q
+.venv/bin/pytest tests/e2e/catalog/ -v
 ```
 
-If a test fails because of a fixture mismatch (e.g., the existing `client` fixture autocreates DB tables but the seed insertion happens after), debug by adding `print(repr(...))` calls inside the fixture, then remove them once the issue is found. Common fixture bugs to look for:
-- Test session DB not created — should be auto-created by `tests/e2e/conftest.py`'s `client` fixture; if it isn't, the accounts e2e wouldn't have worked either
-- Admin user inserted but token decoded against a different secret — make sure both insertion and token issuance use `get_settings()` from the same process
+Expected: 5 tests pass.
 
-- [ ] **Step 4: Run the FULL suite + ruff**
+- [ ] **Step 3: Run full suite**
 
 ```bash
 .venv/bin/pytest -q
-.venv/bin/python -m ruff check app tests
 ```
 
-Both must be green/clean before committing.
+Expected: green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/e2e/catalog/
 git commit -m "$(cat <<'EOF'
-test(e2e): add catalog admin + public flow tests
+test(e2e): catalog admin + public flow
 
-Covers the full admin CRUD lifecycle (create → list → patch →
-deactivate → delete), the role guard (customer hits 403 on admin
-endpoints, no token hits 401), the duplicate-slug conflict, the
-two layers of attribute validation (Pydantic for unknown data_type,
-handler for ENUM-without-values), the public list filter on
-is_active, and the public response shape boundary.
+Five e2e tests covering: full create→public-list→deactivate→public-
+hides flow; duplicate-slug 409; public no-auth; admin-only role
+guard; slug validation propagation. Validates the wire shape of
+{code, message} error payloads for the catalog endpoints.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-### Unit D — verification before handoff
+---
 
-- [ ] Run all e2e tests:
+## Final verification
 
-```bash
-.venv/bin/pytest tests/e2e/ -q
-```
-
-Expect: green (existing accounts tests still pass + new catalog tests pass).
-
-- [ ] Run the full suite + lint:
+- [ ] **Step 1: Full test suite + lint**
 
 ```bash
 .venv/bin/pytest -q
-.venv/bin/python -m ruff check app tests
+make lint
 ```
 
-- [ ] Smoke test the booted app once more:
+Expected: all green. ~210 (Plan 03 baseline) + ~50 new tests = ~260 passing.
+
+- [ ] **Step 2: Smoke import**
 
 ```bash
-BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" \
-  .venv/bin/python -c "from app.main import app; print('ok'); print('title:', app.title)"
+BACKEND_DATABASE_URL="sqlite+aiosqlite:///:memory:" .venv/bin/python -c "
+from app.main import app
+from app.domain.catalog.resource_type import ResourceType
+from app.api.v1.admin_resource_types.routes import router as admin_router
+from app.api.v1.catalog.routes import router as catalog_router
+print('app loaded; admin routes:', len(admin_router.routes))
+print('public routes:', len(catalog_router.routes))
+"
 ```
 
-Expect: `ok`, `title: venue-backend`.
+Expected: prints route counts (5 admin, 1 public).
 
-- [ ] Verify `git log --oneline | head -20` shows ~15 commits forming a clean Plan 03 sequence.
+- [ ] **Step 3: Push branch**
+
+```bash
+git push -u origin feat/plan-04-catalog
+```
+
+- [ ] **Step 4: No commit (verification only)**
 
 ---
 
-## Final whole-implementation review
+## Self-review
 
-After Unit D verification passes, dispatch a final code reviewer (`superpowers:code-reviewer`) over the entire `feat/plan-03-catalog` branch against this plan + spec sections §3 (architecture), §4.2 (cross-feature rules), §5.2 (catalog domain model), and §7.1 + §7.5 (API surface).
+**Spec coverage.** This plan covers spec §5.2 (`ResourceType` aggregate + `AttributeDefinition`) and §7 endpoints (`POST/GET/PATCH/DELETE /admin/resource-types`, `GET /catalog/resource-types`). The "blocked if referenced" invariant from §5.2 is deferred to Plan 06 with a TODO marker (Decision 6). The `validate_attributes` method (§5.2 will be used by Plan 06's Resource creation) is implemented and tested.
 
-The reviewer should specifically check:
-- Layering: domain has no infra/use_cases imports; use_cases has no infra imports; api wires both
-- The `# TODO(plan-04)` in `delete_resource_type.py` is a known and tracked gap, not an unflagged hole
-- AttributeDefinition ↔ dict serialization round-trips through the JSON column without lossy conversions (especially `enum_values` tuple ↔ list)
-- Error mapping at the API boundary: 422 for Pydantic, 4xx for `Result.failure` via `error_handler.unwrap`
-- The public response shape strictly excludes admin-only fields (regression risk on future schema changes)
+**VO reuse.** Slug, Name, ShortDescription, AttributeKey, ShortName all consumed from `app/domain/shared/value_objects/` (Plan 03). One new VO created: `AttributeDefinition` (composite, in `app/domain/catalog/`).
 
-If the review surfaces Critical or Important issues, auto-correct them before merge per project pre-authorization. Minor stylistic items can be deferred.
+**Entity convention §4.4.** `ResourceType` is `@dataclass(slots=True, kw_only=True)` (mutable), inherits `BaseEntity`. Class-level error code constants for invariants. `cls.create()` factory. Mutators: `update_metadata`/`activate`/`deactivate` return `None` (no domain invariant — VO factories validate); `replace_attribute_schema` returns `Result[None]` (enforces unique-key invariant). Private collection `_attribute_schema` with tuple view. `updated_at` bumped in every successful mutator.
 
-## Integration
+**Placeholder scan.** No "TBD"/"TODO" inside step bodies (only in code comments where intentional, e.g., the Plan 06 reference check).
 
-After final review passes:
-- `git checkout main && git merge --ff-only feat/plan-03-catalog && git push origin main`
-- `git branch -d feat/plan-03-catalog`
-- Leave the remote branch for manual deletion.
+**Type consistency.**
+- `Result[ResourceTypeDto]` is the handler-return shape for Create/Update.
+- `Result[None]` for Delete and repository methods.
+- `Result[None]` for entity mutators with invariants.
+- DTOs flatten VO `.value` to plain types; Pydantic schemas mirror DTO.
+- API errors use `{code, message}` per Plan 03.
 
-## Pause point
+**Risks the engineer should watch for.**
 
-Plan 03 ships catalog. The next plan in the sequence (Plan 04 — `resources` feature) depends on `accounts` and `catalog`, both shipped. Pause for user approval before starting Plan 04.
+1. The `db_session` fixture and `http_client`/`admin_token` fixtures are assumed available from Plan 02. If they're not visible, look at how the accounts integration/e2e tests acquire them and either reuse the conftest or import the fixtures.
+2. Alembic autogen sometimes generates spurious DROP statements when stale state exists. Inspect every generated file before committing.
+3. `mypy` may complain about Protocol `_RepoLike` not declaring all repository methods (each handler only declares what it uses). This is intentional — handlers depend on the slimmest interface they need. Suppress the complaint or cast at call site if mypy is strict.
+4. `attribute_schema` JSON storage means the row is returned as a Python list of dicts when read. The `_attribute_from_dict` helper trusts the dict shape — if a hand-edited DB row is malformed, reconstitution explodes at runtime. Acceptable since admin is the only writer.
+
+---
+
+## Execution handoff
+
+Plan complete. Two execution options:
+
+1. **Subagent-Driven (recommended)** — fresh subagent per task, two-stage review, fast iteration.
+2. **Inline Execution** — execute tasks in this session using executing-plans, batch execution with checkpoints.
+
+Reply with **"subagent"** or **"inline"** to proceed.
