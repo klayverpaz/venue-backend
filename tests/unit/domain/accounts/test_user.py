@@ -1,6 +1,4 @@
 from __future__ import annotations
-from datetime import datetime, timezone
-from uuid import uuid4
 from app.domain.accounts.role import Role
 from app.domain.accounts.user import User
 
