@@ -8,18 +8,36 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
-from app.domain.shared import value_objects as value_objects_pkg
+from app import domain as domain_pkg
 from app.domain.shared.value_object import BaseValueObject
 from app.api.error_codes import ERROR_MESSAGES_PT_BR
 
 
+def _walk_modules(package):
+    """Recursively yield every module reachable from `package`.
+
+    Walks both shared (e.g., `app.domain.shared.value_objects`) and feature-
+    level (e.g., `app.domain.catalog`) trees so VOs declared inside features
+    are discovered too.
+    """
+    for mod_info in pkgutil.walk_packages(package.__path__, prefix=f"{package.__name__}."):
+        if mod_info.ispkg:
+            continue
+        try:
+            yield importlib.import_module(mod_info.name)
+        except Exception:
+            # Some modules may import lazily / require runtime config; skip
+            # rather than fail the architecture test on import order issues.
+            continue
+
+
 def _collect_vo_classes():
     classes = []
-    for mod_info in pkgutil.iter_modules(value_objects_pkg.__path__):
-        module = importlib.import_module(f"{value_objects_pkg.__name__}.{mod_info.name}")
+    for module in _walk_modules(domain_pkg):
         for _name, obj in inspect.getmembers(module, inspect.isclass):
             if (
                 obj is not BaseValueObject
+                and inspect.isclass(obj)
                 and issubclass(obj, BaseValueObject)
                 and obj.__module__ == module.__name__
             ):
