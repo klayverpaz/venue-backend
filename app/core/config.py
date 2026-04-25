@@ -23,11 +23,6 @@ class Settings(BaseSettings):
     redis_username: str = ""
     redis_password: SecretStr = SecretStr("")
 
-    ai_provider: Literal["anthropic", "openai", "none"] = "none"
-    ai_model_name: str = ""
-    ai_api_key: SecretStr = SecretStr("")
-    ai_temperature: float = 0.3
-
     model_config = SettingsConfigDict(
         env_prefix="BACKEND_",
         env_file=DOTENV_PATH,
