@@ -1,6 +1,5 @@
 from __future__ import annotations
 import pytest
-from uuid import uuid4
 from app.domain.accounts.jwt_service import TokenClaims, TokenPair
 from app.domain.accounts.role import Role
 from app.domain.accounts.user import User

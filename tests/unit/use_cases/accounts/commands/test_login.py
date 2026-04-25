@@ -1,6 +1,5 @@
 from __future__ import annotations
 import pytest
-from uuid import uuid4
 from app.domain.accounts.role import Role
 from app.domain.accounts.user import User
 from app.use_cases.accounts.commands.login import LoginCommand, LoginHandler
