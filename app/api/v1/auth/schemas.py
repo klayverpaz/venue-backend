@@ -12,10 +12,14 @@ SelfRegisterableRole = Literal["customer", "owner"]
 
 class RegisterRequest(BaseModel):
     email: EmailStr
+    # password is NOT VO-backed; API boundary owns the minimum-length policy.
     password: str = Field(min_length=8, max_length=200)
     role: SelfRegisterableRole
-    full_name: str = Field(min_length=1, max_length=200)
-    phone: str | None = Field(default=None, max_length=14)
+    # full_name and phone are VO-backed (Name, BrazilianPhone) — VOs own
+    # length validation. Per spec §3 decision 17, the Pydantic boundary
+    # does not duplicate length checks on VO-backed fields.
+    full_name: str
+    phone: str | None = None
 
 
 class LoginRequest(BaseModel):
