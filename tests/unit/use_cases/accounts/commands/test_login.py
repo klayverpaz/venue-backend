@@ -76,9 +76,59 @@ async def test_login_unknown_email():
 
 
 @pytest.mark.asyncio
+async def test_login_unknown_email_and_wrong_password_return_identical_response():
+    """Account-enumeration defense: callers must not be able to distinguish 'no such account'
+    from 'wrong password'. Pin the contract so future refactors can't widen the gap."""
+    existing = seed_user(email="alice@example.com", password="hunter2-strong")
+    handler, _, _, _ = make_handler([existing])
+
+    wrong_pw = await handler.handle(LoginCommand(
+        email="alice@example.com", password="wrong",
+    ))
+    unknown = await handler.handle(LoginCommand(
+        email="nobody@example.com", password="anything",
+    ))
+
+    assert wrong_pw.is_failure and unknown.is_failure
+    assert wrong_pw.status_code == unknown.status_code == 401
+    assert wrong_pw.error == unknown.error  # exact message parity
+
+
+@pytest.mark.asyncio
 async def test_login_deactivated_account():
     user = seed_user(is_active=False)
     handler, _, _, _ = make_handler([user])
     r = await handler.handle(LoginCommand(email="alice@example.com", password="hunter2-strong"))
     assert r.is_failure
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_login_rehashes_legacy_hash_on_success():
+    """Opportunistic-rehash path: if the stored hash predates current Argon2 params,
+    a successful login should re-hash and persist the new hash."""
+    h = FakePasswordHasher()
+    # Seed with a "legacy" hash format that the FakePasswordHasher sees as needs_rehash.
+    legacy_user_r = User.create(
+        email="alice@example.com",
+        password_hash="legacy:hunter2-strong",  # not the "fake:..." current format
+        role=Role.CUSTOMER, full_name="Alice", phone=None,
+    )
+    user = legacy_user_r.value
+    repo = InMemoryUserRepository(seed=[user])
+    handler = LoginHandler(repo, h, FakeJwtService())
+
+    # FakePasswordHasher.verify only accepts "fake:..." — so for this path to work,
+    # we need a verify that accepts "legacy:..." too. Use a one-off subclass.
+    class LegacyAcceptingHasher(FakePasswordHasher):
+        def verify(self, plaintext: str, hashed: str) -> bool:
+            return hashed in {f"fake:{plaintext}", f"legacy:{plaintext}"}
+
+    handler = LoginHandler(repo, LegacyAcceptingHasher(), FakeJwtService())
+    r = await handler.handle(LoginCommand(email="alice@example.com", password="hunter2-strong"))
+    assert r.is_success
+
+    persisted = await repo.get_by_email("alice@example.com")
+    assert persisted.password_hash == "fake:hunter2-strong", (
+        "expected opportunistic rehash to current 'fake:' format"
+    )
