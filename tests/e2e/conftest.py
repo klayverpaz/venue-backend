@@ -11,10 +11,13 @@ os.environ.setdefault("BACKEND_ARGON2_PARALLELISM", "1")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.infrastructure.db import session as session_mod
 from app.infrastructure.db.base import Base
+from app.infrastructure.db.mappings import resource_type  # noqa: F401
 from app.infrastructure.db.mappings import user  # noqa: F401
+from app.infrastructure.db.mappings.user import UserModel
 from app.main import app
 
 
@@ -34,3 +37,57 @@ async def client():
     await engine.dispose()
     session_mod._engine = None
     session_mod._sessionmaker = None
+
+
+@pytest_asyncio.fixture
+async def http_client(client):
+    """Alias for ``client``. The catalog e2e tests use this name."""
+    return client
+
+
+async def _register_and_login(
+    client: AsyncClient, *, email: str, password: str, role: str = "customer",
+) -> str:
+    register = await client.post("/v1/auth/register", json={
+        "email": email, "password": password, "role": role,
+        "full_name": "Test User", "phone": None,
+    })
+    assert register.status_code == 201, register.text
+    login = await client.post("/v1/auth/login", json={
+        "email": email, "password": password,
+    })
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
+
+
+@pytest_asyncio.fixture
+async def customer_token(client) -> str:
+    return await _register_and_login(
+        client, email="customer@example.com", password="hunter2-strong",
+    )
+
+
+@pytest_asyncio.fixture
+async def admin_token(client) -> str:
+    # Public registration rejects role=admin. Register as customer, then promote
+    # the row to admin directly in the DB and login again.
+    email = "admin@example.com"
+    password = "hunter2-strong"
+    register = await client.post("/v1/auth/register", json={
+        "email": email, "password": password, "role": "customer",
+        "full_name": "Admin User", "phone": None,
+    })
+    assert register.status_code == 201, register.text
+
+    assert session_mod._sessionmaker is not None
+    async with session_mod._sessionmaker() as s:
+        await s.execute(
+            update(UserModel).where(UserModel.email == email).values(role="admin")
+        )
+        await s.commit()
+
+    login = await client.post("/v1/auth/login", json={
+        "email": email, "password": password,
+    })
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
