@@ -9,7 +9,7 @@ Projeto Python 3.12. Virtualenv local em `.venv/` — **sempre use o Python do v
 
 Nunca rode `python ...` / `pip install ...` sem o venv ativo.
 
-Dependências em `requirements*.txt`. Instalação: `make install` (base + dev). Extras: `make install-postgres`, `make install-mssql`, `make install-ai`.
+Dependências em `requirements*.txt`. Instalação: `make install` (base + dev). Extras: `make install-postgres`, `make install-mssql`.
 
 Testes: `make test` (`.venv/bin/pytest`).
 

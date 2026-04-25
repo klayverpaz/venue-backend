@@ -1,4 +1,4 @@
-.PHONY: install install-postgres install-mssql install-ai run test lint \
+.PHONY: install install-postgres install-mssql run test lint \
         migrate-new migrate-up migrate-down migrate-history redis-dev clean
 
 PYTHON  ?= .venv/bin/python
@@ -15,9 +15,6 @@ install-postgres:
 
 install-mssql:
 	$(PIP) install -r requirements-mssql.txt
-
-install-ai:
-	$(PIP) install -r requirements-ai.txt
 
 run:
 	$(PYTHON) -m app.main
