@@ -1,7 +1,7 @@
 # Venue Backend — Design Spec
 
 **Date:** 2026-04-25
-**Status:** Approved
+**Status:** Approved (revised 2026-04-25 — VO foundation + ratings feature)
 **Source template:** `agentic-workbench/ai-ready-backend-template/`
 **Repository:** `git@github.com:klayverpaz/venue-backend.git`
 
@@ -17,9 +17,9 @@ Project name and folder: `venue-backend`. Located at `agentic-workbench/venue-ba
 
 | Role | Capabilities |
 |---|---|
-| **Admin** | Curates `ResourceType` catalog (admin-managed). Manages users (promote/demote roles, deactivate). Manages owner subscription status. |
-| **Owner** | Registers and manages their `Resource`s. Defines operating hours, slot duration, pricing rules, custom attributes per resource. Reviews and approves/rejects/cancels bookings on their resources. Read-only view of their subscription status. |
-| **Customer** | Browses public resource listings, requests bookings (one or more consecutive slots) with a free-form note, sees their own bookings, cancels until configurable cutoff. |
+| **Admin** | Curates `ResourceType` catalog (admin-managed). Manages users (promote/demote roles, deactivate). Manages owner subscription status. Moderates ratings (hide/unhide). |
+| **Owner** | Registers and manages their `Resource`s. Defines operating hours, slot duration, pricing rules, custom attributes per resource. Reviews and approves/rejects/cancels bookings on their resources. Read-only view of their subscription status and ratings on their resources. |
+| **Customer** | Browses public resource listings, requests bookings (one or more consecutive slots) with a free-form note, sees their own bookings, cancels until configurable cutoff, rates resources after the booking ends. |
 
 A user has exactly one role. Roles are immutable except by an explicit admin handler.
 
@@ -37,15 +37,20 @@ A user has exactly one role. Roles are immutable except by an explicit admin han
 | 8 | Booking payments are off-platform. `Booking.total_price_cents` is recorded but the system never collects money. | Smallest viable scope; avoids PSP integration. |
 | 9 | Platform monetization is a soft owner subscription (status field only, admin-controlled). When `INACTIVE`, owner cannot approve bookings and resources are hidden from public listings. | Exercises the gating logic in the model now; defers PSP work. |
 | 10 | Pricing model: day-of-week × time-of-day rules per resource; gaps fall back to a `base_price_cents` on the resource. | Owners with peak/off-peak prices are the norm; fallback prevents validation deadlocks for new owners. |
-| 11 | Discovery: each owner and each resource gets a public URL (slug-based). Plus a platform-wide listing filterable by resource type and city/region. No map, no geosearch, no ratings. | Fits the realistic acquisition model (owners drive traffic via social) without skipping browse-ability. |
+| 11 | Discovery: each owner and each resource gets a public URL (slug-based). Plus a platform-wide listing filterable by resource type and city/region. No map, no geosearch. Ratings are aggregated from completed bookings. | Fits the realistic acquisition model (owners drive traffic via social) without skipping browse-ability. |
 | 12 | Cancellations: owner can cancel anytime; customer can cancel until `customer_cancellation_cutoff_hours` before slot start. Audit trail on the booking. | Encodes the natural asymmetry; no monetary penalties (money is off-platform). |
 | 13 | Notifications: in-app inbox for every event + transactional email via a port (`IEmailSender`). Logging adapter for MVP; real provider later. | In-app alone gets missed; email is essentially free; port keeps WhatsApp/SMS a swap-in. |
 | 14 | Idempotency keys accepted on `POST /me/bookings` and approval/reject endpoints. | Cheap to add; avoids the inevitable double-click / network-retry duplicate booking. |
-| 15 | Localization: identifiers and code in English; user-facing strings in pt-BR via a translation map. | Matches likely user base; keeps code grep-able. |
+| 15 | Localization: identifiers and code in English; user-facing strings in pt-BR. **VO and handler errors are stable code identifiers** (e.g., `"NameCannotBeEmpty"`); the HTTP boundary in `app/api/error_handler.py` maps codes → pt-BR. | Stable contract for tests + i18n, decoupled from display language. |
+| 16 | **Money is represented as `int` cents (smallest currency unit), wrapped in a `Money` VO.** Float is forbidden for monetary values. | Floats can't represent decimals exactly (`0.1 + 0.2 ≠ 0.3`); industry standard for marketplaces (Stripe, Mercado Pago, Adyen) is integer minor units. |
+| 17 | **Domain entities NEVER hold raw primitives where a VO exists.** `User.full_name: Name`, not `str`; `Booking.slot_range: DateTimeRange`, not two datetimes; etc. DB columns for VO-backed strings are `TEXT` (no `VARCHAR(N)`) — the VO is the single source of truth for length. | Centralizes validation and prevents "this `name` got past validation because it took a different path" bugs. |
+| 18 | **Ratings are per-booking** (1 rating per completed `APPROVED` booking), not per (customer × resource). Resource exposes `rating_avg` and `rating_count` derived on-the-fly via SQL aggregation; **no denormalized cache** in MVP. | Reflects discrete experiences (rainy Saturday vs sunny Saturday); eligibility check is trivial (`booking.status = APPROVED AND end_at < now`); on-the-fly aggregation with index on `resource_id` is microseconds at MVP scale. |
+| 19 | Rating creation window: 90 days after `slot_range.end_at`. Rating edit window: 7 days after `created_at`. | Anti-retaliation / anti-spam on ancient bookings; short edit window matches Booking.com pattern. |
+| 20 | Admin can soft-hide a rating (`is_hidden = True`); never deletes. Hidden ratings excluded from average/count/public listings. | Audit trail preserved; no information loss. |
 
 ## 4. Architecture
 
-The template's rules apply unchanged. Layered + vertical slicing per feature. Six features, each owning one aggregate root.
+The template's rules apply unchanged. Layered + vertical slicing per feature. Seven features, each owning one aggregate root.
 
 ```
 api ──▶ use_cases ──▶ domain ◀── infrastructure
@@ -53,16 +58,17 @@ api ──▶ use_cases ──▶ domain ◀── infrastructure
 
 `domain/` stays pure Python; `use_cases/` depends only on `domain/<feature>/repository.py` `Protocol`s; `infrastructure/` provides concrete repositories and adapters; `api/v1/<feature>/routes.py` does HTTP-only validation.
 
-### 4.1 Feature split (six aggregates)
+### 4.1 Feature split (seven aggregates)
 
 | Feature | Aggregate root | Sub-entities / VOs |
 |---|---|---|
-| `accounts` | `User` | `Email`, `Role` |
+| `accounts` | `User` | `Role` |
 | `catalog` | `ResourceType` | `AttributeDefinition` |
 | `resources` | `Resource` | `WeeklySchedule`, `PricingRule`, `CustomAttribute` |
 | `bookings` | `Booking` | `SlotRange`, `StatusChange` |
 | `subscriptions` | `OwnerSubscription` | `SubStatus` |
 | `notifications` | `Notification` | `IEmailSender` port |
+| `ratings` | `Rating` | (none — leaf aggregate) |
 
 ### 4.2 Cross-feature rules
 
@@ -77,19 +83,62 @@ Cross-feature handlers expected:
 | `CancelBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Branch by actor role; enforce customer cutoff; notify counterpart. |
 | `PromoteUserRoleHandler` | `accounts/commands` | `IUserRepository` | Admin-only; the only role-mutation entrypoint. |
 | `SetOwnerSubscriptionStatusHandler` | `subscriptions/commands` | `ISubscriptionRepository`, `IUserRepository` | Admin-only; verifies target user is `OWNER`. |
+| `CreateRatingHandler` | `ratings/commands` | `IRatingRepository`, `IBookingRepository`, `INotificationService` | Verifies booking is APPROVED + ended + within 90d window + customer matches; persists rating; notifies owner. |
+| `UpdateRatingHandler` | `ratings/commands` | `IRatingRepository` | Customer-only; enforces 7d edit window. |
+| `HideRatingHandler` | `ratings/commands` | `IRatingRepository` | Admin-only; soft-hide + reason. |
+
+### 4.3 Shared Value Objects
+
+All VOs live under `app/domain/shared/value_objects/<vo>.py`. **Every VO follows the same convention** (Python translation of the team's C# `SimpleValueObject<T>` / `ValueObject<TSelf>` pattern):
+
+- `@dataclass(frozen=True, slots=True)` inheriting `BaseValueObject`.
+- Public entrypoint is `cls.create(raw) -> Result[Self]`. Direct `__init__` is the dataclass auto-generated one but is treated as private — call sites use `create()`.
+- `cls.create_if_not_empty(raw) -> Result[Self | None]` companion for optional inputs (returns `None` on null/empty).
+- `_validate(...) -> str` private static; returns the error code or `""`.
+- Error messages are **stable identifier codes** as class constants (e.g., `Name.NAME_CANNOT_BE_EMPTY = "NameCannotBeEmpty"`), NOT human-readable strings. The HTTP boundary maps codes → pt-BR.
+- `MAX_LENGTH` (and similar bounds) are exposed as class constants.
+- String VOs strip on entry.
+- Equality is free from `frozen=True`.
+
+#### Catalog of VOs
+
+| VO | Type | Bound | Where used |
+|---|---|---|---|
+| `Email` | `str` | max 254 | `User.email` (existing) |
+| `BrazilianPhone` | `str` | tel format | `User.phone` (existing) |
+| `Slug` | `str` | max 80, kebab-case `^[a-z][a-z0-9-]*[a-z0-9]$`, no leading/trailing/repeated `-` | `ResourceType.slug`, `Resource.slug` |
+| `Name` | `str` | max 500, min 1 (after strip), no control chars | `User.full_name`, `ResourceType.name`, `Resource.name`, `Resource.city`, `Resource.region` |
+| `ShortName` | `str` | max 40, min 1 | `AttributeDefinition.label`, `CustomAttribute.label`, entries in `AttributeDefinition.enum_values` |
+| `ShortDescription` | `str` | max 500, min 0 (empty allowed) | `ResourceType.description`, `Resource.description`, `Booking.customer_note`, `OwnerSubscription.notes`, `Rating.comment` |
+| `AttributeKey` | `str` | max 50, snake_case `^[a-z][a-z0-9_]*$` | `AttributeDefinition.key`, `CustomAttribute.key` |
+| `Money` | `int` cents | ≥ 0, ≤ 10¹⁰ (R$ 100M) | `Resource.base_price_cents`, `PricingRule.price_cents`, `Booking.total_price_cents` |
+| `TimeWindow` | `(time, time)` | `start < end`, intra-day (no overnight wrap) | per-day operating hours, `PricingRule.starts_at`/`ends_at` |
+| `DateTimeRange` | `(datetime, datetime)` | both tz-aware UTC, `start_at < end_at` | `Booking.SlotRange` (alias) |
+| `IanaTimezone` | `str` | ∈ `zoneinfo.available_timezones()` | `Resource.timezone` |
+| `SlotDuration` | `int` | ∈ {30, 45, 60, 90, 120} | `Resource.slot_duration_minutes` |
+| `CancellationCutoff` | `int` hours | 0 ≤ n ≤ 168 | `Resource.customer_cancellation_cutoff_hours` |
+| `RatingScore` | `int` | ∈ {1, 2, 3, 4, 5} | `Rating.score` |
+
+#### Removed / renamed
+
+- The template-shipped `NonNegativeFloat` is removed. Money flows exclusively through `Money` (int cents); float is forbidden for any monetary value.
+- The template-shipped `Percentage` VO is left as-is (unused by the current model); kept available if a future feature needs it.
+- `Email` and `BrazilianPhone` stay; their internal error strings are refactored to the stable-code style above (e.g., `Email.EMAIL_CANNOT_BE_EMPTY = "EmailCannotBeEmpty"`).
 
 ## 5. Domain model
+
+> **Notation:** any property typed as a VO name (e.g., `name: Name`) is constructed via the VO's `create()` factory at the entity's `create()` boundary. Raw primitives never enter the entity for those fields.
 
 ### 5.1 `accounts` — `User`
 
 ```
 User
 ├── id: UUID
-├── email: Email (VO, unique)
-├── password_hash: str
+├── email: Email
+├── password_hash: str                # opaque hash; PasswordHasher controls format
 ├── role: Role (enum: ADMIN | OWNER | CUSTOMER)
-├── full_name: str
-├── phone: str (optional)
+├── full_name: Name
+├── phone: BrazilianPhone | None
 ├── is_active: bool
 └── created_at, updated_at
 ```
@@ -104,18 +153,18 @@ User
 ```
 ResourceType
 ├── id: UUID
-├── slug: str (unique, e.g. "football-field")
-├── name: str
-├── description: str
+├── slug: Slug                        # unique, e.g. "football-field"
+├── name: Name
+├── description: ShortDescription
 ├── attribute_schema: list[AttributeDefinition]
 └── is_active: bool
 
-AttributeDefinition (VO)
-├── key: str
-├── label: str
+AttributeDefinition (VO, composite)
+├── key: AttributeKey
+├── label: ShortName
 ├── data_type: AttrType (STRING | INT | BOOL | ENUM)
 ├── required: bool
-└── enum_values: list[str] | None  (only when data_type == ENUM)
+└── enum_values: list[ShortName] | None  (only when data_type == ENUM)
 ```
 
 **Invariants**
@@ -131,41 +180,39 @@ Resource
 ├── id: UUID
 ├── owner_id: UUID                          # User with role=OWNER
 ├── resource_type_id: UUID                  # ResourceType
-├── slug: str (unique, public URL)
-├── name: str
-├── description: str
-├── city: str
-├── region: str
-├── timezone: str                           # IANA tz, e.g. "America/Sao_Paulo"
-├── slot_duration_minutes: int              # ∈ {30, 45, 60, 90, 120}
+├── slug: Slug                              # unique, public URL
+├── name: Name
+├── description: ShortDescription
+├── city: Name
+├── region: Name
+├── timezone: IanaTimezone
+├── slot_duration_minutes: SlotDuration
 ├── operating_hours: WeeklySchedule
 ├── pricing_rules: list[PricingRule]        # may have gaps
-├── base_price_cents: int                   # fallback price when no rule covers a slot
+├── base_price_cents: Money                 # fallback price when no rule covers a slot
 ├── base_attributes: dict[str, Any]         # values for ResourceType.attribute_schema
 ├── custom_attributes: list[CustomAttribute]
-├── customer_cancellation_cutoff_hours: int # default 24
+├── customer_cancellation_cutoff_hours: CancellationCutoff
 ├── is_published: bool
 └── created_at, updated_at, deleted_at (soft-delete)
 
-WeeklySchedule (VO)
-└── 7 entries: { weekday: Weekday, opens_at: time, closes_at: time, closed: bool }
+WeeklySchedule (VO, composite)
+└── 7 entries: { weekday: Weekday, hours: TimeWindow | None (None = closed) }
 
-PricingRule (VO)
+PricingRule (VO, composite)
 ├── weekdays: set[Weekday]
-├── starts_at: time
-├── ends_at: time
-└── price_cents: int
+├── window: TimeWindow
+└── price: Money
 
-CustomAttribute (VO)
-├── key: str
-├── label: str
-└── value: str
+CustomAttribute (VO, composite)
+├── key: AttributeKey
+├── label: ShortName
+└── value: ShortDescription
 ```
 
 **Invariants**
 - `owner_id`'s role must be `OWNER` (verified at handler level).
-- `slot_duration_minutes` is in the allowed enum.
-- Each non-closed weekday's `(opens_at, closes_at)` window is divisible by `slot_duration_minutes` (slot grid alignment).
+- Each non-closed weekday's `TimeWindow` is divisible by `slot_duration_minutes` (slot grid alignment).
 - `pricing_rules` may not overlap each other within the same weekday × time window. Gaps are allowed and fall back to `base_price_cents`.
 - `base_attributes` satisfies `resource_type.attribute_schema`: every required key present, every value matches `data_type`, every `ENUM` value is in `enum_values`.
 - `custom_attribute.key` values unique within a resource and disjoint from `base_attributes` keys.
@@ -178,26 +225,23 @@ Booking
 ├── id: UUID
 ├── resource_id: UUID
 ├── customer_id: UUID                       # User with role=CUSTOMER
-├── slot_range: SlotRange
+├── slot_range: DateTimeRange               # tz-aware UTC; start_at < end_at
 ├── status: BookingStatus                   # PENDING | APPROVED | REJECTED | CANCELLED | EXPIRED
-├── customer_note: str (optional, max 1000 chars)
-├── total_price_cents: int                  # frozen at request time
+├── customer_note: ShortDescription | None
+├── total_price_cents: Money                # frozen at request time
 ├── status_history: list[StatusChange]
 ├── cancelled_by: ActorRef | None           # OWNER | CUSTOMER, with user_id
 └── created_at, updated_at
 
-SlotRange (VO)
-├── start_at: datetime (tz-aware)
-├── end_at: datetime (tz-aware)
-└── slot_count: int  (derived: (end_at − start_at) / resource.slot_duration_minutes)
+# Derived: slot_count = (slot_range.end_at − slot_range.start_at) / resource.slot_duration_minutes
 
-StatusChange (VO)
+StatusChange (VO, composite)
 ├── from_status: BookingStatus
 ├── to_status: BookingStatus
 ├── actor_id: UUID
 ├── actor_role: Role
 ├── at: datetime
-└── reason: str | None
+└── reason: str | None                      # ≤ 500 chars; not VO-wrapped (audit field)
 ```
 
 **Invariants**
@@ -217,7 +261,7 @@ OwnerSubscription
 ├── owner_id: UUID (unique)
 ├── status: SubStatus (ACTIVE | TRIALING | PAST_DUE | INACTIVE)
 ├── status_changed_at: datetime
-├── notes: str (admin-freeform)
+├── notes: ShortDescription                 # admin-freeform; empty allowed
 └── created_at, updated_at
 ```
 
@@ -232,8 +276,8 @@ OwnerSubscription
 Notification
 ├── id: UUID
 ├── recipient_id: UUID
-├── kind: NotifKind                          # see below
-├── payload: dict                            # serialized event context
+├── kind: NotifKind
+├── payload: dict                           # JSON, kind-specific shape
 ├── read_at: datetime | None
 └── created_at
 
@@ -242,6 +286,7 @@ NotifKind
 ├── BOOKING_APPROVED
 ├── BOOKING_REJECTED
 ├── BOOKING_CANCELLED
+├── BOOKING_RATED                           # NEW — rating created on owner's resource
 └── SUBSCRIPTION_CHANGED
 
 IEmailSender (Protocol, in domain/notifications/)
@@ -251,6 +296,42 @@ IEmailSender (Protocol, in domain/notifications/)
 **Invariants**
 - Every notification persists an in-app row regardless of email delivery outcome.
 - Email send failures are logged but do not fail the originating use case.
+
+### 5.7 `ratings` — `Rating`
+
+```
+Rating
+├── id: UUID
+├── booking_id: UUID                        # FK + UNIQUE — 1 rating per booking
+├── resource_id: UUID                       # denormalized for AVG queries
+├── customer_id: UUID                       # denormalized for "my ratings"
+├── score: RatingScore                      # int 1..5
+├── comment: ShortDescription | None        # optional
+├── is_hidden: bool                         # admin moderation; default False
+├── hidden_reason: str | None               # ≤ 500 chars; admin freeform on hide
+└── created_at, updated_at
+```
+
+**Invariants**
+- `booking_id` UNIQUE (DB index) — a booking yields at most one rating.
+- The booking referenced must satisfy: `status == APPROVED`, `slot_range.end_at < now`, `customer_id == rating.customer_id`. Verified in `CreateRatingHandler`.
+- **Creation window:** `now ≤ booking.slot_range.end_at + 90 days`. After that, creation is rejected.
+- **Edit window:** `now ≤ rating.created_at + 7 days`. After that, only `is_hidden` mutates (admin-only).
+- `is_hidden = True` removes the row from public average, count, and listings.
+
+**Read-side derivation (resource aggregation)**
+
+`Resource` does NOT store rating fields. Every endpoint that returns a resource (public or owner-scoped) computes:
+
+```sql
+SELECT
+  AVG(score)::numeric(3, 1) AS rating_avg,    -- one decimal, NULL if no rows
+  COUNT(*)                  AS rating_count
+FROM ratings
+WHERE resource_id = $1 AND is_hidden = FALSE
+```
+
+Owner-scoped resource list adds the same agg. Public owner page (`GET /owners/{slug}`) computes a count-weighted average across all of the owner's published resources.
 
 ## 6. Booking lifecycle and concurrency
 
@@ -303,15 +384,16 @@ IEmailSender (Protocol, in domain/notifications/)
 
 ## 7. API surface
 
-All endpoints under `/api/v1/`. JWT auth via the same mechanism as the template's `users` sample. Pagination on every list endpoint: `?page=&page_size=` (max 100). Errors mapped from `Result` per `error_handler.py`.
+All endpoints under `/api/v1/`. JWT auth via the same mechanism as the template's `users` sample. Pagination on every list endpoint: `?page=&page_size=` (max 100). Errors mapped from `Result` per `error_handler.py`, which translates VO/handler error codes to pt-BR.
 
 ### 7.1 Public (no auth)
 
 ```
 GET  /resources                              # filters: type=<slug>&city=&region=&page=&page_size=
-GET  /resources/{slug}                       # public resource page
+GET  /resources/{slug}                       # public resource page (incl. rating_avg + rating_count)
 GET  /resources/{slug}/agenda?from=&to=      # slot grid: AVAILABLE | PENDING | APPROVED + price
-GET  /owners/{slug}                          # public owner page (their published resources)
+GET  /resources/{slug}/ratings               # only ratings with comment, not hidden, paginated
+GET  /owners/{slug}                          # public owner page (their published resources + rating agg)
 GET  /catalog/resource-types                 # for filter UI
 ```
 
@@ -332,6 +414,11 @@ POST   /me/bookings                          # body: { resource_id, slot_range, 
 GET    /me/bookings?status=
 GET    /me/bookings/{id}
 POST   /me/bookings/{id}/cancel              # 403 past cutoff
+
+POST   /me/bookings/{booking_id}/rating      # body: { score, comment? }
+PATCH  /me/bookings/{booking_id}/rating      # body: { score?, comment? }; 403 after 7d
+GET    /me/ratings
+
 GET    /me/notifications
 POST   /me/notifications/{id}/read
 ```
@@ -341,7 +428,7 @@ POST   /me/notifications/{id}/read
 ```
 # Resources
 POST   /me/resources
-GET    /me/resources
+GET    /me/resources                         # incl. rating_avg + rating_count per resource
 PATCH  /me/resources/{id}
 PATCH  /me/resources/{id}/operating-hours
 PATCH  /me/resources/{id}/pricing-rules
@@ -354,6 +441,9 @@ GET    /me/resources/{id}/agenda?from=&to=
 POST   /me/bookings/{booking_id}/approve     # Idempotency-Key supported
 POST   /me/bookings/{booking_id}/reject      # body: { reason? }
 POST   /me/bookings/{booking_id}/cancel
+
+# Ratings on my resources (read-only)
+GET    /me/resources/{id}/ratings            # all ratings (hidden + not), paginated
 
 # Read-only
 GET    /me/subscription
@@ -378,31 +468,27 @@ POST   /admin/users/{id}/deactivate
 # Subscriptions
 GET    /admin/subscriptions
 POST   /admin/owners/{owner_id}/subscription
+
+# Ratings (moderation)
+GET    /admin/ratings?hidden=&resource_id=
+POST   /admin/ratings/{id}/hide              # body: { reason? }
+POST   /admin/ratings/{id}/unhide
 ```
 
 ## 8. Bootstrap procedure
 
-Performed in the implementation phase (the writing-plans skill expands these into a step-by-step plan).
+The plan order below is the contract for `docs/superpowers/plans/`.
 
-1. Copy `ai-ready-backend-template/` → `agentic-workbench/venue-backend/`, excluding `.git`. Initialize a fresh git repo.
-2. Apply Recipe A (`docs/template-customization.md`) to remove the AI module:
-   - delete `app/ai/`, `app/api/v1/ai_chat/`, `tests/unit/ai`, `tests/integration/ai`, `tests/unit/architecture/test_ai_isolation.py`
-   - strip the AI conditional from `app/main.py` lifespan (and the unused `settings = get_settings()` line above it)
-   - remove `ai_provider`, `ai_model_name`, `ai_api_key`, `ai_temperature` from `app/core/config.py`
-   - delete `requirements-ai.txt` and the `install-ai` Make target
-   - clean `BACKEND_AI_PROVIDER=none` from `tests/conftest.py` and `tests/e2e/conftest.py`
-   - delete `test_settings_ai_provider_default_none`
-   - update the docstring at the top of `app/api/v1/router.py`
-   - run tests; grep for `ai_provider|app.ai|ai_chat` returns nothing
-3. Replace the `users` sample (Recipe C) with the real `accounts` feature in the same step. Read the existing `users/` code first to understand auth + JWT mechanics, port them into `accounts/` with the `Role` enum added.
-4. Build the remaining features in this order (each adds a migration, mappings, repos, handlers, routes, tests):
-   1. `catalog` (no dependencies)
-   2. `subscriptions` (depends on `accounts`)
-   3. `resources` (depends on `accounts`, `catalog`)
-   4. `notifications` (no dependencies; port + logging adapter)
-   5. `bookings` (depends on all of the above)
-5. Seed data: one Admin account (env-var-driven on first boot) and a starter `ResourceType("Football Field")` so the platform is immediately usable.
-6. Postgres-only. MSSQL files stay as the template provides them but unused; not removed (cheap to keep).
+1. **Plan 01 — Bootstrap** ✅ done. Copy `ai-ready-backend-template/` → `agentic-workbench/venue-backend/` and apply Recipe A (remove AI module).
+2. **Plan 02 — Accounts** ✅ done. JWT auth + `accounts` feature with `Role` enum, replacing the `users` sample.
+3. **Plan 03 — VO foundation + accounts retrofit.** Ship the 12 new VOs (`Slug`, `Name`, `ShortName`, `ShortDescription`, `AttributeKey`, `Money`, `TimeWindow`, `DateTimeRange`, `IanaTimezone`, `SlotDuration`, `CancellationCutoff`, `RatingScore`) plus refactor existing `Email` and `BrazilianPhone` to the stable-code style. Update `app/api/error_handler.py` to map VO/handler error codes to pt-BR. Retrofit `accounts`: `User.full_name: str → Name`. Reset and regenerate Alembic migrations on top of the new VO-aware mappings.
+4. **Plan 04 — Catalog.** `ResourceType` aggregate using `Slug`/`Name`/`ShortDescription`/`AttributeKey`/`ShortName`. Admin CRUD + public listing.
+5. **Plan 05 — Subscriptions.** `OwnerSubscription` aggregate; admin-only mutation; `is_operational()` gating.
+6. **Plan 06 — Resources.** `Resource` aggregate using `Slug`/`Name`/`ShortDescription`/`Money`/`TimeWindow`/`IanaTimezone`/`SlotDuration`/`CancellationCutoff`. Owner CRUD + public read.
+7. **Plan 07 — Notifications.** `Notification` aggregate + `IEmailSender` port + logging adapter. Includes `BOOKING_RATED` enum value.
+8. **Plan 08 — Bookings.** `Booking` aggregate using `DateTimeRange`/`Money`/`ShortDescription`. Approval transaction with advisory lock + exclusion constraint. Nightly expiry job.
+9. **Plan 09 — Ratings.** `Rating` aggregate. Customer create/edit endpoints. Public list with comment. Admin moderation. `Resource` GETs gain `rating_avg` + `rating_count` aggregates.
+10. **Plan 10 — Seed + production wiring.** Bootstrap admin account (env-driven), seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
 
 ## 9. Testing strategy
 
@@ -410,27 +496,32 @@ Mirrors the template's `tests/` layout.
 
 | Level | Path | What it covers |
 |---|---|---|
+| Unit (VO) | `tests/unit/domain/shared/value_objects/` | One file per VO. Asserts on **error code constants** (e.g., `assert r.error == Name.NAME_CANNOT_BE_EMPTY`), never substring matches. |
 | Unit (domain) | `tests/unit/domain/` | Pure invariants per aggregate. E.g., `Booking.approve()` from `APPROVED` raises; `Resource.compute_price(slot_range)` matches rules and falls back. |
-| Unit (use cases) | `tests/unit/use_cases/` | Handler tests with in-memory fake repos implementing `domain/<feature>/repository.py` `Protocol`s. E.g., `RequestBookingHandler` rejects when subscription `INACTIVE`. |
-| Integration | `tests/integration/` | Handler + real DB. Critical: partial unique index prevents two `APPROVED` overlaps; advisory lock serializes concurrent approvals. |
-| End-to-end | `tests/e2e/` | One happy-path per role flow via FastAPI test client. |
-| Architecture | `tests/unit/architecture/` | Keep existing layer-import tests. Add: no `domain/<feature_a>/` imports from `domain/<feature_b>/`. |
+| Unit (use cases) | `tests/unit/use_cases/` | Handler tests with in-memory fake repos implementing `domain/<feature>/repository.py` `Protocol`s. E.g., `RequestBookingHandler` rejects when subscription `INACTIVE`; `CreateRatingHandler` rejects past 90d window. |
+| Integration | `tests/integration/` | Handler + real DB. Critical: partial unique index prevents two `APPROVED` overlaps; advisory lock serializes concurrent approvals; rating `booking_id` UNIQUE enforced. |
+| End-to-end | `tests/e2e/` | One happy-path per role flow via FastAPI test client, plus the rating happy path (book → approve → wait → rate → see in public list). |
+| Architecture | `tests/unit/architecture/` | Keep existing layer-import tests. Add: no `domain/<feature_a>/` imports from `domain/<feature_b>/`; entities import VOs from `domain/shared/value_objects/`. |
 
 ## 10. Out of scope (see `Opportunities.md`)
 
 - Booking payment status field, in-platform payments (Stripe / Mercado Pago / PIX), marketplace split.
 - Self-serve flat-rate subscription with PSP webhooks; tiered plans with per-tier limits.
 - Per-slot price overrides for holidays / special dates.
-- Full marketplace discovery: map, geosearch, ratings, sort.
+- Full marketplace discovery: map, geosearch, sort by rating.
 - WhatsApp / SMS notifications via the existing port.
 - Auto-confirm trusted customers (per-resource allowlist that bypasses approval).
 - Slot-time-based reminders and no-show flagging.
 - Schedule exceptions / holidays at the resource level.
-- Reviews and ratings.
+- Owner reply to a rating; helpful/not-helpful votes on ratings; rating disputes.
+- Owner rating the customer (no-show flag).
 - Reports / analytics module from the template (kept removable per Recipe B).
+- Overnight `TimeWindow` (e.g., 18:00–02:00 wrapping past midnight).
+- Denormalized `rating_avg`/`rating_count` cache on `Resource` (current MVP computes on-the-fly).
 
 ## 11. Open items (none blocking, flagging for awareness)
 
-- Time zones: server stores all timestamps in UTC; resource's `timezone` field (§5.3) is used to interpret `WeeklySchedule` and `PricingRule` window times in the resource's local zone, and to compute the cutoff before customer cancellation.
+- Time zones: server stores all timestamps in UTC; resource's `timezone` field is used to interpret `WeeklySchedule` and `PricingRule` window times in the resource's local zone, and to compute the cutoff before customer cancellation.
 - Email templates: pt-BR strings via a translation map; concrete templates are an implementation detail, not a design concern.
 - Soft-delete semantics for `User` (deactivation) vs `Resource` (soft-delete via `deleted_at`): different fields, intentionally — users are never hard-deleted because of foreign keys on bookings; resources can be soft-deleted because they're owner property.
+- Error code → pt-BR mapping table lives in `app/api/error_handler.py`. Adding a new VO error means adding both the code constant on the VO and an entry in the mapping. The architecture test in §9 should enforce 1:1 coverage so a new code without a translation fails CI.
