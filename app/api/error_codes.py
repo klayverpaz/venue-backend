@@ -106,6 +106,13 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
 
     # Handler-level (not VO-bound) codes
     "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
+
+    # ResourceType (entity-level codes — registered in arch test allowlist)
+    "DuplicateAttributeKey": "Atributos duplicados — chaves devem ser únicas dentro do tipo.",
+    "RequiredAttributeMissing": "Atributo obrigatório ausente.",
+    "UnknownAttributeKey": "Atributo desconhecido — não está no schema do tipo.",
+    "AttributeTypeMismatch": "Valor do atributo não bate com o tipo declarado.",
+    "AttributeEnumValueNotAllowed": "Valor do atributo enum fora dos valores permitidos.",
 }
 
 
