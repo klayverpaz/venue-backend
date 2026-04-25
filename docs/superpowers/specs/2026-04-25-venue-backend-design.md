@@ -125,6 +125,46 @@ All VOs live under `app/domain/shared/value_objects/<vo>.py`. **Every VO follows
 - The template-shipped `Percentage` VO is left as-is (unused by the current model); kept available if a future feature needs it.
 - `Email` and `BrazilianPhone` stay; their internal error strings are refactored to the stable-code style above (e.g., `Email.EMAIL_CANNOT_BE_EMPTY = "EmailCannotBeEmpty"`).
 
+### 4.4 Entity conventions
+
+All aggregate roots follow the same convention (Python translation of the team's C# `Entity<TId>` pattern):
+
+- `@dataclass(slots=True, kw_only=True)` inheriting `BaseEntity`. **Not** `frozen=True` — entities are mutable through their methods.
+- **Class-level error code constants** for entity-scoped invariants and state-transition errors. Same stable-identifier style as VOs:
+  ```python
+  class Booking(BaseEntity):
+      BOOKING_ALREADY_APPROVED = "BookingAlreadyApproved"
+      INVALID_STATUS_TRANSITION = "InvalidStatusTransition"
+      CUSTOMER_CUTOFF_PASSED = "CustomerCutoffPassed"
+  ```
+- **Public construction via `cls.create(...) -> Result[Self]` only.** The dataclass `__init__` is treated as private; call sites always go through `create()`.
+- **VO-typed fields throughout** (`name: Name`, `slot_range: DateTimeRange`, `total_price_cents: Money`). No raw primitives where a VO exists.
+- **Mutators that enforce an invariant return `Result[None]`.** They mutate `self` as a side effect; the `Result` signals whether the mutation succeeded:
+  ```python
+  def approve(self, *, owner_id: UUID, at: datetime) -> Result[None]:
+      if self.status != BookingStatus.PENDING:
+          return Result.failure(self.INVALID_STATUS_TRANSITION)
+      self.status = BookingStatus.APPROVED
+      self._status_history.append(...)
+      self.updated_at = _utcnow()
+      return Result.success(None)
+  ```
+- **Mutators with no invariant return `None`** (e.g., `User.set_role`, `User.deactivate`). The discriminator is "is there a domain rule that can fail here?".
+- **State-transition methods (`mark_as_X`, `approve`, `reject`, `cancel`)** enforce the state machine. Invalid transitions return `Result.failure(<entity>.<CODE>)`.
+- **Private collections + immutable views** for child collections:
+  ```python
+  _status_history: list[StatusChange] = field(default_factory=list)
+
+  @property
+  def status_history(self) -> tuple[StatusChange, ...]:
+      return tuple(self._status_history)
+  ```
+  External code reads through the tuple; mutation is only through `add_*` / `remove_*` methods on the entity.
+- **`Add*` / `Remove*` collection methods** validate uniqueness and ownership before mutating, return `Result[None]`.
+- **`updated_at` is bumped inside every successful mutator.** A `_utcnow()` helper at module level keeps imports tight.
+- **Pure read methods on state** (`is_in_window(now)`, `is_delayed(now)`) coexist with mutators and return primitives — no `Result` wrapping reads.
+- **No business logic in `routes.py` or repositories.** All invariants live in the entity or in the use-case handler that orchestrates multiple entities (per CLAUDE.md §"Regra cross-entity").
+
 ## 5. Domain model
 
 > **Notation:** any property typed as a VO name (e.g., `name: Name`) is constructed via the VO's `create()` factory at the entity's `create()` boundary. Raw primitives never enter the entity for those fields.
