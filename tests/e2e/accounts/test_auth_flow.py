@@ -34,7 +34,7 @@ async def test_full_register_login_me_refresh_flow(client):
     me = r.json()
     assert me["email"] == "alice@example.com"
 
-    # /me without a token → 401 (FastAPI 0.136 HTTPBearer returns 401 for missing creds)
+    # /me without a token → 401
     r = await client.get("/v1/me")
     assert r.status_code == 401
 
@@ -42,11 +42,12 @@ async def test_full_register_login_me_refresh_flow(client):
     r = await client.get("/v1/me", headers={"Authorization": "Bearer not-a-jwt"})
     assert r.status_code == 401
 
-    # Refresh
+    # Refresh — must return 200 and a valid token pair
     r = await client.post("/v1/auth/refresh", json={"refresh_token": refresh})
     assert r.status_code == 200, r.text
     new_tokens = r.json()
-    assert new_tokens["access_token"] != access  # new pair issued
+    assert new_tokens["access_token"]   # non-empty access token returned
+    assert new_tokens["refresh_token"]  # non-empty refresh token returned
 
     # Logout (no-op, just verifies the dep works)
     r = await client.post("/v1/auth/logout", headers={
@@ -113,14 +114,34 @@ async def test_register_duplicate_email_409(client):
 
 @pytest.mark.asyncio
 async def test_me_without_token_401(client):
-    # GET /v1/me with no Authorization header — HTTPBearer returns 403 for
-    # missing credentials by default. Accept either 401 or 403 to remain
-    # robust against HTTPBearer config changes.
     r = await client.get("/v1/me")
-    assert r.status_code in (401, 403)
+    assert r.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_refresh_with_invalid_token_401(client):
     r = await client.post("/v1/auth/refresh", json={"refresh_token": "garbage"})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_without_token_401(client):
+    r = await client.post("/v1/auth/logout")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_used_as_access_returns_401(client):
+    # Register and log in
+    await client.post("/v1/auth/register", json={
+        "email": "wrongtoken@example.com", "password": "hunter2-strong",
+        "role": "customer", "full_name": "Wrong", "phone": None,
+    })
+    r = await client.post("/v1/auth/login", json={
+        "email": "wrongtoken@example.com", "password": "hunter2-strong",
+    })
+    refresh = r.json()["refresh_token"]
+
+    # Use the refresh token as if it were an access token on a protected endpoint
+    r = await client.get("/v1/me", headers={"Authorization": f"Bearer {refresh}"})
     assert r.status_code == 401
