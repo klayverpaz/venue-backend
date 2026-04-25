@@ -115,6 +115,7 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "AttributeEnumValueNotAllowed": "Valor do atributo enum fora dos valores permitidos.",
     "SlugAlreadyTaken": "Slug já está em uso.",
     "ResourceTypeNotFound": "Tipo de recurso não encontrado.",
+    "InvalidDataType": "Tipo de dado de atributo desconhecido.",
 }
 
 

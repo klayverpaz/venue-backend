@@ -95,6 +95,7 @@ def test_no_orphan_translations_in_mapping():
         "AttributeEnumValueNotAllowed",
         "SlugAlreadyTaken",
         "ResourceTypeNotFound",
+        "InvalidDataType",
     }
     real_orphans = [c for c in orphans if c not in handler_level_allowlist]
 
