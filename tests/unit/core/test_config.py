@@ -15,13 +15,6 @@ def test_settings_carrega_env_com_prefix_backend(monkeypatch):
     assert s.port == 9000
 
 
-def test_settings_ai_provider_default_none(monkeypatch):
-    monkeypatch.setenv("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-    get_settings.cache_clear()
-    s = get_settings()
-    assert s.ai_provider == "none"
-
-
 def test_settings_exige_database_url(monkeypatch, tmp_path):
     monkeypatch.delenv("BACKEND_DATABASE_URL", raising=False)
     # Aponta env_file para um caminho inexistente para evitar que o .env local
