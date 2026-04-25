@@ -4,6 +4,10 @@ import os
 # Set env vars before app.main is imported (get_settings() is called at module level).
 os.environ.setdefault("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("BACKEND_ENVIRONMENT", "test")
+os.environ.setdefault("BACKEND_JWT_SECRET_KEY", "test-jwt-secret-fixed-for-determinism")
+os.environ.setdefault("BACKEND_ARGON2_TIME_COST", "1")
+os.environ.setdefault("BACKEND_ARGON2_MEMORY_COST_KIB", "8")
+os.environ.setdefault("BACKEND_ARGON2_PARALLELISM", "1")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

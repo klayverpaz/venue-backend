@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     redis_username: str = ""
     redis_password: SecretStr = SecretStr("")
 
+    # JWT
+    jwt_secret_key: SecretStr = SecretStr("dev-only-jwt-secret-DO-NOT-USE-IN-PROD")
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expires_minutes: int = 30
+    jwt_refresh_token_expires_days: int = 7
+
+    # Argon2 (defaults follow OWASP 2024; tests override to cheap params)
+    argon2_time_cost: int = 3
+    argon2_memory_cost_kib: int = 12_288
+    argon2_parallelism: int = 1
+
     model_config = SettingsConfigDict(
         env_prefix="BACKEND_",
         env_file=DOTENV_PATH,

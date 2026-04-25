@@ -15,6 +15,17 @@ def test_settings_carrega_env_com_prefix_backend(monkeypatch):
     assert s.port == 9000
 
 
+def test_settings_jwt_defaults(monkeypatch):
+    monkeypatch.setenv("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("BACKEND_JWT_SECRET_KEY", "abc")
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.jwt_secret_key.get_secret_value() == "abc"
+    assert s.jwt_algorithm == "HS256"
+    assert s.jwt_access_token_expires_minutes == 30
+    assert s.jwt_refresh_token_expires_days == 7
+
+
 def test_settings_exige_database_url(monkeypatch, tmp_path):
     monkeypatch.delenv("BACKEND_DATABASE_URL", raising=False)
     # Aponta env_file para um caminho inexistente para evitar que o .env local
