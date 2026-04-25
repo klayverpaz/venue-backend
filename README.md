@@ -1,8 +1,10 @@
-# Backend Template
+# venue-backend
 
-Python backend template, AI-ready, clonável como ponto de partida para novos projetos. Arquitetura em camadas com CQRS, Value Objects no domínio, SQLAlchemy async, Alembic, Redis e módulo opcional de IA com LangGraph.
+Backend Python para uma plataforma de aluguel de espaços por slots horários. Três papéis (Admin, Owner, Customer), com cada Owner gerenciando um ou mais `Resource`s rentáveis e Customers solicitando bookings que o Owner aprova ou rejeita.
 
-Ver [docs/superpowers/specs/2026-04-24-backend-template-design.md](docs/superpowers/specs/2026-04-24-backend-template-design.md) para o design completo.
+Design: [docs/superpowers/specs/2026-04-25-venue-backend-design.md](docs/superpowers/specs/2026-04-25-venue-backend-design.md).
+Planos: [docs/superpowers/plans/](docs/superpowers/plans/).
+Construído sobre o template `ai-ready-backend-template` (módulo de IA removido).
 
 ## Estrutura
 
@@ -18,12 +20,10 @@ app/
 │       │   ├── routes.py
 │       │   ├── schemas.py
 │       │   └── deps.py
-│       ├── reports/           # endpoints analíticos
-│       │   ├── routes.py
-│       │   ├── schemas.py
-│       │   └── deps.py
-│       └── ai_chat/
-│           └── routes.py
+│       └── reports/           # endpoints analíticos
+│           ├── routes.py
+│           ├── schemas.py
+│           └── deps.py
 ├── use_cases/
 │   ├── users/               # CQRS dentro da feature
 │   │   ├── dtos.py
@@ -48,7 +48,6 @@ app/
 │   │   ├── session.py
 │   │   └── mappings/        # ORM mappings (UserModel, …)
 │   └── repositories/        # implementações concretas
-├── ai/                      # opcional — LangGraph (intacto)
 ├── core/                    # config, logging, context
 ├── migrations/              # Alembic
 └── main.py
@@ -67,10 +66,7 @@ make install
 # 2. Instala o driver do DB escolhido
 make install-postgres      # ou make install-mssql
 
-# 3. (Opcional) Instala deps de IA
-make install-ai
-
-# 4. Configura o ambiente
+# 3. Configura o ambiente
 cp .env.example .env
 # Edite .env com suas credenciais
 ```
@@ -213,18 +209,6 @@ class AssignProjectOwnerHandler:
 
 Anti-patterns: handler chamando outro handler, importar `UserRepository` (impl concreta) em vez de `IUserRepository`, ou colocar a regra em `routes.py`.
 
-## Módulo de IA
-
-Controlado por `BACKEND_AI_PROVIDER` (`anthropic`, `openai` ou `none`).
-
-Endpoint: `POST /v1/ai/chat` com body `{"message": "...", "session_id": "..."}` retorna SSE com frames `session`, `token`, `done`, `error`.
-
-Tools em `app/ai/tools/`. A tool exemplo `get_user_by_email` mostra como integrar o agente com o domínio via query handler.
-
-LangSmith: setar `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` ativa tracing automaticamente.
-
-**Remover IA:** deletar `app/ai/`, não usar `requirements-ai.txt`, setar `BACKEND_AI_PROVIDER=none`. O `main.py` não carrega o módulo nesse caso.
-
 ## Analytics / Relatórios
 
 Features analíticas seguem um padrão diferente do CRUD com domínio rico: elas **não criam pasta em `domain/`**. O lado de leitura do CQRS pode ser "Q anêmico" — SQL direto via `sqlalchemy.text(...)` para um DTO frozen-dataclass, sem reidratar aggregates.
@@ -244,12 +228,11 @@ Para adicionar um novo relatório, siga **Recipe D** em [docs/template-customiza
 | Migrations | Alembic |
 | DB | PostgreSQL (recomendado) ou SQL Server |
 | Cache/Sessão | Redis (ou Valkey) |
-| AI (opcional) | LangChain + LangGraph + LangSmith |
 | Testes | pytest + pytest-asyncio + aiosqlite |
 | Lint/Type | ruff + mypy |
 
 ## Licenças
 
-Todos os componentes base são gratuitos para uso comercial em produto próprio. Detalhes em [docs/superpowers/specs/2026-04-24-backend-template-design.md](docs/superpowers/specs/2026-04-24-backend-template-design.md#2-stack-e-rationale-de-licenças).
+Todos os componentes base são gratuitos para uso comercial em produto próprio. Detalhes do raciocínio de licenças por componente: ver a [especificação do template-base](docs/superpowers/specs/2026-04-24-backend-template-design.md#2-stack-e-rationale-de-licenças) (este projeto herda essas escolhas).
 
 Produção 100% permissiva: PostgreSQL + Valkey.

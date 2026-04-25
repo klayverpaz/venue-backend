@@ -1,4 +1,6 @@
-# Backend Template - Instruções
+# venue-backend — Instruções
+
+Backend de uma plataforma de aluguel de espaços por slots horários (ex.: campos de futebol, quadras, salões). Construído sobre o `ai-ready-backend-template` com o módulo de IA já removido. O design completo está em [docs/superpowers/specs/2026-04-25-venue-backend-design.md](docs/superpowers/specs/2026-04-25-venue-backend-design.md). Os planos de implementação ficam em [docs/superpowers/plans/](docs/superpowers/plans/).
 
 ## Python
 
@@ -16,16 +18,6 @@ Testes: `make test` (`.venv/bin/pytest`).
 Migrações: `make migrate-new msg="..."`, `make migrate-up`.
 
 Start local: `make run` (ou `./start_services.sh`, adicionado em task posterior).
-
-## Adaptando o template (clonou agora? leia isto)
-
-Se você clonou este template para começar um projeto, leia primeiro **[docs/template-customization.md](docs/template-customization.md)**. Esse documento é escrito para um assistente LLM (Claude Code, etc.) e contém:
-
-- Taxonomia de módulos (core vs opcional).
-- Receitas para remover módulos opcionais (AI, reports) sem quebrar a arquitetura.
-- Receita para substituir a feature `users` (sample) pela sua primeira feature real.
-
-Quando o usuário pedir "remova X" ou "comece novo projeto sem Y", consulte aquele arquivo antes de mexer no código.
 
 ## Arquitetura
 

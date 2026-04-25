@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     logger.info("Recursos liberados.")
 
 
-app = FastAPI(title="Backend Template", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="venue-backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,

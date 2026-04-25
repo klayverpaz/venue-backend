@@ -9,7 +9,7 @@ DOTENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
-    app_name: str = "backend-template"
+    app_name: str = "venue-backend"
     environment: Literal["development", "production", "test"] = "development"
     host: str = "0.0.0.0"
     port: int = 8000
