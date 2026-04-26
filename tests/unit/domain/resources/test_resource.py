@@ -253,3 +253,29 @@ def test_publish_unpublish_toggle():
     assert res.is_published is True
     res.unpublish()
     assert res.is_published is False
+
+
+def test_soft_delete_sets_deleted_at():
+    res = Resource.create(**_valid_kwargs()).value
+    now = datetime(2026, 4, 26, 12, 0, 0, tzinfo=timezone.utc)
+    r = res.soft_delete(now=now)
+    assert r.is_success
+    assert res.deleted_at == now
+    assert res.is_deleted() is True
+
+
+def test_soft_delete_already_deleted_returns_failure():
+    res = Resource.create(**_valid_kwargs()).value
+    now = datetime(2026, 4, 26, 12, 0, 0, tzinfo=timezone.utc)
+    res.soft_delete(now=now)
+    r = res.soft_delete(now=now)
+    assert r.is_failure
+    assert r.error == Resource.RESOURCE_ALREADY_DELETED
+
+
+def test_soft_delete_naive_datetime_rejected():
+    res = Resource.create(**_valid_kwargs()).value
+    naive = datetime(2026, 4, 26, 12, 0, 0)
+    r = res.soft_delete(now=naive)
+    assert r.is_failure
+    assert r.error == Resource.DELETED_AT_NOT_TZ_AWARE

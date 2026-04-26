@@ -381,3 +381,15 @@ class Resource(BaseEntity):
     def unpublish(self) -> None:
         self.is_published = False
         self.updated_at = _utcnow()
+
+    def soft_delete(self, *, now: datetime) -> Result[None]:
+        if now.tzinfo is None:
+            return Result.failure(self.DELETED_AT_NOT_TZ_AWARE)
+        if self.deleted_at is not None:
+            return Result.failure(self.RESOURCE_ALREADY_DELETED)
+        self.deleted_at = now
+        self.updated_at = now
+        return Result.success(None)
+
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
