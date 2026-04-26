@@ -2,6 +2,7 @@ from __future__ import annotations
 import pytest
 from app.core.config import Settings
 from app.domain.accounts.role import Role
+from app.domain.accounts.user import User
 from app.use_cases.accounts.commands.register_user import (
     RegisterUserCommand, RegisterUserHandler,
 )
@@ -21,6 +22,29 @@ def make_handler():
         trial_duration_days=3,
     )
     return RegisterUserHandler(repo, hasher, subs, settings), repo, hasher, subs
+
+
+@pytest.fixture
+def user_repo():
+    return InMemoryUserRepository()
+
+
+@pytest.fixture
+def sub_repo():
+    return InMemorySubscriptionRepository()
+
+
+@pytest.fixture
+def hasher():
+    return FakePasswordHasher()
+
+
+@pytest.fixture
+def settings():
+    return Settings(
+        database_url="sqlite+aiosqlite:///:memory:",
+        trial_duration_days=3,
+    )
 
 
 @pytest.mark.asyncio
@@ -43,7 +67,6 @@ async def test_register_customer_success():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="OWNER public_slug generation implemented in Task 13 of Plan 06")
 async def test_register_owner_success():
     handler, _, _, _ = make_handler()
     r = await handler.handle(RegisterUserCommand(
@@ -128,7 +151,6 @@ async def test_register_user_propagates_user_create_details():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="OWNER public_slug generation implemented in Task 13 of Plan 06")
 async def test_register_owner_creates_trialing_subscription():
     handler, _repo, _hasher, subs = make_handler()
     r = await handler.handle(RegisterUserCommand(
@@ -161,7 +183,6 @@ async def test_register_customer_does_not_create_subscription():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="OWNER public_slug generation implemented in Task 13 of Plan 06")
 async def test_register_owner_trial_window_uses_config_value():
     from datetime import timedelta
     handler, _repo, _hasher, subs = make_handler()
@@ -175,3 +196,65 @@ async def test_register_owner_trial_window_uses_config_value():
     sub = await subs.get_by_owner_id(r.value.id)
     delta = sub.trial_ends_at - sub.status_changed_at
     assert delta == timedelta(days=3)
+
+
+@pytest.mark.asyncio
+async def test_owner_registration_generates_public_slug(
+    user_repo, sub_repo, hasher, settings,
+):
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    cmd = RegisterUserCommand(
+        email="o@example.com",
+        password="senha-forte-1",
+        role=Role.OWNER,
+        full_name="João da Silva",
+        phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_success
+    user = await user_repo.get_by_id(r.value.id)
+    assert user.public_slug is not None
+    assert user.public_slug.value == "joao-da-silva"
+
+
+@pytest.mark.asyncio
+async def test_owner_registration_collision_appends_suffix(
+    user_repo, sub_repo, hasher, settings,
+):
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    # Pre-seed an OWNER with slug "joao-da-silva"
+    existing = User.create(
+        email="first@example.com", password_hash="x", role=Role.OWNER,
+        full_name="First", phone=None, public_slug="joao-da-silva",
+    ).value
+    await user_repo.add(existing)
+
+    cmd = RegisterUserCommand(
+        email="o@example.com",
+        password="senha-forte-1",
+        role=Role.OWNER,
+        full_name="João da Silva",
+        phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_success
+    user = await user_repo.get_by_id(r.value.id)
+    assert user.public_slug.value == "joao-da-silva-2"
+
+
+@pytest.mark.asyncio
+async def test_customer_registration_no_slug(
+    user_repo, sub_repo, hasher, settings,
+):
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    cmd = RegisterUserCommand(
+        email="c@example.com",
+        password="senha-forte-1",
+        role=Role.CUSTOMER,
+        full_name="Bruno Lima",
+        phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_success
+    user = await user_repo.get_by_id(r.value.id)
+    assert user.public_slug is None

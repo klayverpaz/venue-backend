@@ -10,10 +10,12 @@ from app.domain.accounts.user import User
 from app.domain.shared.result import Result
 from app.domain.subscriptions.owner_subscription import OwnerSubscription
 from app.domain.subscriptions.repository import ISubscriptionRepository
+from app.use_cases.accounts.commands._slugify import slugify
 from app.use_cases.accounts.dtos import UserDto
 
 
 MIN_PASSWORD_LENGTH = 8
+MAX_SLUG_RETRIES = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,12 +60,29 @@ class RegisterUserHandler:
                 status_code=409,
             )
 
+        public_slug: str | None = None
+        if cmd.role is Role.OWNER:
+            base = slugify(cmd.full_name)
+            candidate = base
+            for attempt in range(MAX_SLUG_RETRIES):
+                existing = await self._users.get_by_public_slug(candidate)
+                if existing is None:
+                    public_slug = candidate
+                    break
+                candidate = f"{base}-{attempt + 2}"
+            if public_slug is None:
+                return Result.failure(
+                    "PublicSlugAlreadyTaken",
+                    status_code=409,
+                )
+
         user_r = User.create(
             email=cmd.email,
             password_hash=self._hasher.hash(cmd.password),
             role=cmd.role,
             full_name=cmd.full_name,
             phone=cmd.phone,
+            public_slug=public_slug,
         )
         if user_r.is_failure:
             return Result.from_failure(user_r, status_code=422)

@@ -5,7 +5,6 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.mark.skip(reason="OWNER public_slug generation implemented in Task 13 of Plan 06")
 async def test_owner_register_creates_trialing_subscription_and_can_read_it(
     http_client,
 ):
@@ -39,7 +38,6 @@ async def test_owner_register_creates_trialing_subscription_and_can_read_it(
     assert body["trial_ends_at"] is not None
 
 
-@pytest.mark.skip(reason="OWNER public_slug generation implemented in Task 13 of Plan 06")
 async def test_admin_changes_status_then_owner_sees_new_status(
     http_client, admin_token,
 ):
