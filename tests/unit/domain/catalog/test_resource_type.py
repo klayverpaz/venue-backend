@@ -51,7 +51,10 @@ def test_resource_type_create_propagates_slug_error():
         attribute_schema=[],
     )
     assert r.is_failure
-    assert Slug.SLUG_INVALID_FORMAT in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("slug", Slug.SLUG_INVALID_FORMAT) in codes
 
 
 def test_resource_type_create_propagates_name_error():
@@ -62,7 +65,10 @@ def test_resource_type_create_propagates_name_error():
         attribute_schema=[],
     )
     assert r.is_failure
-    assert Name.NAME_CANNOT_BE_EMPTY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("name", Name.NAME_CANNOT_BE_EMPTY) in codes
 
 
 def test_resource_type_create_rejects_duplicate_attribute_keys():
@@ -75,7 +81,25 @@ def test_resource_type_create_rejects_duplicate_attribute_keys():
         attribute_schema=[a1, a2],
     )
     assert r.is_failure
-    assert ResourceType.DUPLICATE_ATTRIBUTE_KEY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("attribute_schema", ResourceType.DUPLICATE_ATTRIBUTE_KEY) in codes
+
+
+def test_resource_type_create_aggregates_multiple_field_failures():
+    r = ResourceType.create(
+        slug="BAD slug",
+        name="",
+        description="",
+        attribute_schema=[],
+    )
+    assert r.is_failure
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("slug", Slug.SLUG_INVALID_FORMAT) in codes
+    assert ("name", Name.NAME_CANNOT_BE_EMPTY) in codes
 
 
 def test_resource_type_attribute_schema_returns_tuple_view():

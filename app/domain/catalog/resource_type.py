@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Self
 from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.shared.entity import BaseEntity
+from app.domain.shared.field_error import FieldError
 from app.domain.shared.result import Result
 from app.domain.shared.value_objects.name import Name
 from app.domain.shared.value_objects.short_description import ShortDescription
@@ -38,26 +39,26 @@ class ResourceType(BaseEntity):
         attribute_schema: Iterable[AttributeDefinition],
         is_active: bool = True,
     ) -> Result[Self]:
-        errors: list[str] = []
+        errors: list[FieldError] = []
 
         slug_r = Slug.create(slug)
         if slug_r.is_failure:
-            errors.append(slug_r.error)
+            errors.append(FieldError(code=slug_r.error, field="slug"))
 
         name_r = Name.create(name)
         if name_r.is_failure:
-            errors.append(name_r.error)
+            errors.append(FieldError(code=name_r.error, field="name"))
 
         desc_r = ShortDescription.create(description)
         if desc_r.is_failure:
-            errors.append(desc_r.error)
+            errors.append(FieldError(code=desc_r.error, field="description"))
 
         schema_list = list(attribute_schema)
         if cls._has_duplicate_keys(schema_list):
-            errors.append(cls.DUPLICATE_ATTRIBUTE_KEY)
+            errors.append(FieldError(code=cls.DUPLICATE_ATTRIBUTE_KEY, field="attribute_schema"))
 
         if errors:
-            return Result.failure("; ".join(errors))
+            return Result.failure_many(errors)
 
         return Result.success(cls(
             slug=slug_r.value,
