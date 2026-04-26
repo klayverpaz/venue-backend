@@ -97,4 +97,32 @@ async def test_admin_create_propagates_slug_validation_error(http_client, admin_
     )
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "SlugInvalidFormat" in detail["code"]
+    assert detail["code"] == "ValidationFailed"
+    codes = {(d["field"], d["code"]) for d in detail["details"]}
+    assert ("slug", "SlugInvalidFormat") in codes
+
+
+async def test_admin_create_emits_validation_envelope_for_multiple_invalid_fields(
+    http_client, admin_token,
+):
+    response = await http_client.post(
+        "/v1/admin/resource-types",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "slug": "BAD slug",
+            "name": "",
+            "description": "x" * 1000,  # exceeds ShortDescription.MAX_LENGTH (500)
+            "attribute_schema": [],
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "ValidationFailed"
+    assert detail["message"] == "Falha de validação."
+    fields = {d["field"] for d in detail["details"]}
+    assert {"slug", "name", "description"}.issubset(fields)
+    for entry in detail["details"]:
+        assert set(entry.keys()) == {"field", "code", "message"}
+        assert entry["code"]
+        assert entry["message"]
