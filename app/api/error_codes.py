@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from app.domain.catalog.attribute import AttributeDefinition
 from app.domain.shared.value_objects.attribute_key import AttributeKey
+from app.domain.subscriptions.owner_subscription import OwnerSubscription
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 from app.domain.shared.value_objects.cancellation_cutoff import CancellationCutoff
 from app.domain.shared.value_objects.date_time_range import DateTimeRange
@@ -119,6 +120,26 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "SlugAlreadyTaken": "Slug já está em uso.",
     "ResourceTypeNotFound": "Tipo de recurso não encontrado.",
     "InvalidDataType": "Tipo de dado de atributo desconhecido.",
+
+    # Subscriptions (Plan 05) — handler-level
+    "OwnerNotFound": "Proprietário não encontrado.",
+    "UserIsNotOwner": "Usuário não é proprietário.",
+    "SubscriptionNotFound": "Assinatura não encontrada.",
+    "OwnerAlreadyHasSubscription": "Proprietário já possui assinatura.",
+    "InvalidSubscriptionStatus": "Status de assinatura inválido.",
+    # Subscriptions (Plan 05) — entity-level invariants (programming bugs;
+    # never reach unwrap, but mapped for documentation + arch test parity).
+    OwnerSubscription.OWNER_ID_REQUIRED: "ID do proprietário é obrigatório.",
+    OwnerSubscription.TRIAL_ENDS_AT_REQUIRED_FOR_TRIALING:
+        "Assinatura em TRIALING precisa de data de fim de trial.",
+    OwnerSubscription.TRIAL_ENDS_AT_FORBIDDEN_OUTSIDE_TRIALING:
+        "Data de fim de trial só é válida para status TRIALING.",
+    OwnerSubscription.TRIAL_DURATION_DAYS_INVALID:
+        "Duração de trial deve ser inteiro positivo.",
+    OwnerSubscription.STATUS_CHANGED_AT_MUST_BE_TZ_AWARE:
+        "Timestamp de mudança de status precisa ter fuso horário.",
+    OwnerSubscription.TRIAL_ENDS_AT_MUST_BE_TZ_AWARE:
+        "Data de fim de trial precisa ter fuso horário.",
 }
 
 

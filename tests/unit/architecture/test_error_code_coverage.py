@@ -97,6 +97,18 @@ def test_no_orphan_translations_in_mapping():
         "ResourceTypeNotFound",
         "InvalidDataType",
         "ValidationFailed",
+        # Plan 05 — subscriptions
+        "OwnerNotFound",
+        "UserIsNotOwner",
+        "SubscriptionNotFound",
+        "OwnerAlreadyHasSubscription",
+        "InvalidSubscriptionStatus",
+        "OwnerIdRequired",
+        "TrialEndsAtRequiredForTrialing",
+        "TrialEndsAtForbiddenOutsideTrialing",
+        "TrialDurationDaysInvalid",
+        "StatusChangedAtMustBeTzAware",
+        "TrialEndsAtMustBeTzAware",
     }
     real_orphans = [c for c in orphans if c not in handler_level_allowlist]
 
