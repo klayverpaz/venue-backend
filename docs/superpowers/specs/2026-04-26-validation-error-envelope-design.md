@@ -28,12 +28,17 @@ This bites hardest in Plan 06 (`Resource.create`), which aggregates `Slug + Name
 - New factories: `Result.failure_many(errors, status_code=None)` and `Result.from_failure(other, status_code=None)`.
 - `unwrap()` emits a `ValidationFailed` envelope when `result.details` is populated.
 - Migrate the aggregators that currently use `"; "`-join, plus one for shape consistency:
-  - `User.create`
-  - `ResourceType.create`
-  - `ResourceType.update_metadata`
-  - `ResourceType.validate_attributes` (also drops the `code:field` colon-suffix encoding)
-  - `ResourceType.replace_attribute_schema` (single-error today; switch to `failure_many` of one for shape consistency)
+  - **Domain layer:**
+    - `User.create`
+    - `ResourceType.create`
+    - `ResourceType.update_metadata`
+    - `ResourceType.validate_attributes` (also drops the `code:field` colon-suffix encoding)
+    - `ResourceType.replace_attribute_schema` (single-error today; switch to `failure_many` of one for shape consistency)
+  - **Use-cases layer:**
+    - `CreateResourceTypeHandler.handle` (aggregates `AttributeDefinition.create` failures over the schema list, plus an `InvalidDataType:<value>` colon-suffix)
+    - `UpdateResourceTypeHandler.handle` (same pattern)
 - `RegisterUserHandler` re-wrap of `User.create` failure switches to `Result.from_failure(...)` to preserve `details`.
+- `CreateResourceTypeHandler` / `UpdateResourceTypeHandler` re-wrap of `ResourceType.{create,update_metadata,replace_attribute_schema}` failures also switches to `Result.from_failure(...)`.
 - `ERROR_MESSAGES_PT_BR` gains `"ValidationFailed"`.
 - Architecture test (`test_error_code_coverage.py`) gets `"ValidationFailed"` added to `handler_level_allowlist`.
 - Test migration: ~15 unit-test asserts switch from `"<code>" in r.error` to inspecting `r.details`. One new e2e test demonstrates the envelope with multiple `details`.
@@ -208,9 +213,18 @@ if user_r.is_failure:
 
 The other three `Result.failure(...)` calls in this handler stay as-is (raw-pt-BR strings — out of scope, see §2).
 
-### 5.7 Cross-aggregate handlers (`CreateResourceTypeHandler`, `UpdateResourceTypeHandler`)
+### 5.7 `CreateResourceTypeHandler` and `UpdateResourceTypeHandler`
 
-Inspect during implementation. If they re-wrap `ResourceType.create` / `update_metadata` / `replace_attribute_schema` failures with a different `Result[T]` type or different `status_code`, switch to `Result.from_failure(...)`. Otherwise no change.
+Both handlers aggregate `AttributeDefinition.create()` failures over the schema list and prepend an `InvalidDataType:<value>` colon-suffix when the raw `data_type` string isn't a valid `AttrType`. Migration mirrors §5.5:
+
+- The local `errors: list[str]` accumulator becomes `list[FieldError]`.
+- The colon-suffix is replaced: `InvalidDataType:<value>` becomes `FieldError(code="InvalidDataType", field=f"attribute_schema[{idx}].data_type")` where `idx` is the position in the input list. The dynamic `<value>` is dropped from the code (it was never useful — the value is in the request body).
+- `AttributeDefinition.create()` failures become `FieldError(code=r.error, field=f"attribute_schema[{idx}]")`.
+- Final emission uses `Result.failure_many(errors, status_code=400)`.
+
+Re-wraps of `ResourceType.create` / `update_metadata` / `replace_attribute_schema` failures switch to `Result.from_failure(rt_r, status_code=400)` to preserve the upstream `details`.
+
+Repo-level failures (`add` / `update` returning `Result[None]` failure) stay flat — those are infrastructure errors, not validation. Continue using `Result.failure(add_r.error, status_code=...)`.
 
 ## 6. Test migration
 
@@ -238,7 +252,8 @@ assert any(e.code == Slug.SLUG_INVALID_FORMAT for e in r.details)
 
 - `tests/unit/domain/accounts/test_user.py` — ~5 asserts.
 - `tests/unit/domain/catalog/test_resource_type.py` — ~10 asserts. Note: the existing assertion `"players" in r.error` was a workaround for the colon-suffix encoding; it becomes `assert any(e.field == "players" for e in r.details)`.
-- `tests/unit/use_cases/catalog/commands/test_create_resource_type.py` — 1 assert.
+- `tests/unit/use_cases/catalog/commands/test_create_resource_type.py` — asserts checking `r.error` for `InvalidDataType:<value>` or aggregator pass-through switch to `r.details` inspection.
+- `tests/unit/use_cases/catalog/commands/test_update_resource_type.py` — same pattern (the handler has the same aggregation logic).
 - `tests/unit/use_cases/accounts/commands/test_register_user.py` — verify; likely no change since the handler currently asserts only on status code.
 
 ### 6.3 New tests
@@ -271,9 +286,9 @@ Single PR, slim. Order of operations within the plan:
 4. Migrate `User.create` + tests.
 5. Migrate `ResourceType.{create, update_metadata, replace_attribute_schema, validate_attributes}` + tests.
 6. Update `RegisterUserHandler` re-wrap.
-7. Inspect catalog handlers; update if needed.
+7. Migrate `CreateResourceTypeHandler` / `UpdateResourceTypeHandler` aggregation + re-wraps.
 8. Add e2e test demonstrating envelope with multiple details.
-9. Run full test suite. Verify no `; ` joined strings remain in domain code (`grep -r '"; "' app/domain` should be empty).
+9. Run full test suite. Verify no `; ` joined strings remain in `app/domain` or `app/use_cases` (`grep -rn '"; "' app/domain app/use_cases` should be empty).
 
 The plan is expected to be small — single session, single PR, single review pass.
 
