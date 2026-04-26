@@ -27,7 +27,9 @@ from app.domain.shared.value_objects.short_description import ShortDescription
 from app.domain.shared.value_objects.short_name import ShortName
 from app.domain.shared.value_objects.slot_duration import SlotDuration
 from app.domain.shared.value_objects.slug import Slug
+from app.domain.accounts.user import User
 from app.domain.resources.pricing_rule import PricingRule
+from app.domain.resources.resource import Resource
 from app.domain.resources.weekly_schedule import WeeklySchedule
 from app.domain.shared.value_objects.time_window import TimeWindow
 
@@ -105,6 +107,19 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     # PricingRule (resource VO)
     PricingRule.EMPTY_WEEKDAYS: "Regra de preço precisa ter ao menos um dia da semana.",
 
+    # Resource entity (entity-level codes — registered in arch test allowlist)
+    Resource.PRICING_RULES_OVERLAP: "Regras de preço se sobrepõem.",
+    Resource.PRICING_RULE_NOT_ALIGNED_TO_SLOT_GRID: "Regra de preço não alinhada à grade de slots.",
+    Resource.PRICING_RULE_OUTSIDE_OPERATING_HOURS: "Regra de preço fora do horário de funcionamento.",
+    Resource.DUPLICATE_CUSTOM_ATTRIBUTE_KEY: "Atributo customizado duplicado.",
+    Resource.CUSTOM_ATTRIBUTE_KEY_CONFLICTS_WITH_BASE: "Atributo customizado conflita com atributo base.",
+    Resource.RESOURCE_ALREADY_DELETED: "Recurso já está deletado.",
+    Resource.DELETED_AT_NOT_TZ_AWARE: "Data de exclusão precisa ser tz-aware UTC.",
+
+    # User entity (entity-level codes — registered in arch test allowlist)
+    User.PUBLIC_SLUG_REQUIRED_FOR_OWNER: "Owner precisa de slug público.",
+    User.PUBLIC_SLUG_FORBIDDEN_FOR_NON_OWNER: "Slug público é exclusivo de owners.",
+
     # DateTimeRange
     DateTimeRange.DATE_TIME_RANGE_INVALID_TYPE: "Intervalo de datas em formato inválido.",
     DateTimeRange.DATE_TIME_RANGE_NOT_TZ_AWARE: "Datas precisam de fuso horário (tz-aware).",
@@ -120,6 +135,12 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
 
     # Handler-level (not VO-bound) codes
     "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
+
+    # Resource handler-level (Plan 06)
+    "PublicSlugAlreadyTaken": "Slug público já em uso.",
+    "ResourceNotFound": "Recurso não encontrado.",
+    "ResourceTypeInactive": "Tipo de recurso está inativo.",
+    "TimeWindowInvalidType": "Janela de horário em formato inválido.",
 
     # ResourceType (entity-level codes — registered in arch test allowlist)
     "DuplicateAttributeKey": "Atributos duplicados — chaves devem ser únicas dentro do tipo.",
