@@ -43,7 +43,9 @@ def test_create_user_invalid_email():
         phone=None,
     )
     assert r.is_failure
-    assert "email" in r.error.lower()
+    assert r.error is None
+    assert r.details is not None
+    assert any(e.field == "email" for e in r.details)
 
 
 def test_user_full_name_is_name_vo():
@@ -68,7 +70,10 @@ def test_user_create_propagates_name_validation_error():
         phone=None,
     )
     assert r.is_failure
-    assert Name.NAME_CANNOT_BE_EMPTY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("full_name", Name.NAME_CANNOT_BE_EMPTY) in codes
 
 
 def test_user_create_propagates_name_max_length_error():
@@ -80,7 +85,10 @@ def test_user_create_propagates_name_max_length_error():
         phone=None,
     )
     assert r.is_failure
-    assert Name.NAME_CANNOT_BE_GREATER_THAN_MAX_LENGTH in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("full_name", Name.NAME_CANNOT_BE_GREATER_THAN_MAX_LENGTH) in codes
 
 
 def test_create_user_blank_full_name():
@@ -92,7 +100,32 @@ def test_create_user_blank_full_name():
         phone=None,
     )
     assert r.is_failure
-    assert Name.NAME_CANNOT_BE_EMPTY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("full_name", Name.NAME_CANNOT_BE_EMPTY) in codes
+
+
+def test_user_create_aggregates_multiple_field_failures():
+    """Spec §5.1: User.create emits one FieldError per failing field."""
+    from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
+    from app.domain.shared.value_objects.email import Email
+
+    r = User.create(
+        email="not-an-email",
+        password_hash="",
+        role=Role.CUSTOMER,
+        full_name="",
+        phone="abc",
+    )
+    assert r.is_failure
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("email", Email.EMAIL_INVALID_FORMAT) in codes
+    assert ("full_name", Name.NAME_CANNOT_BE_EMPTY) in codes
+    assert ("password_hash", "PasswordHashCannotBeEmpty") in codes
+    assert ("phone", BrazilianPhone.PHONE_CONTAINS_INVALID_CHARACTERS) in codes
 
 
 def test_change_password_hash_updates_timestamp():

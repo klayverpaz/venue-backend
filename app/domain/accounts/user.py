@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Self
 from app.domain.accounts.role import Role
 from app.domain.shared.entity import BaseEntity
+from app.domain.shared.field_error import FieldError
 from app.domain.shared.result import Result
 from app.domain.shared.value_objects.brazilian_phone import BrazilianPhone
 from app.domain.shared.value_objects.email import Email
@@ -33,25 +34,25 @@ class User(BaseEntity):
         full_name: str,
         phone: str | None,
     ) -> Result[Self]:
-        errors: list[str] = []
+        errors: list[FieldError] = []
 
         email_r = Email.create(email)
         if email_r.is_failure:
-            errors.append(email_r.error)
+            errors.append(FieldError(code=email_r.error, field="email"))
 
         name_r = Name.create(full_name)
         if name_r.is_failure:
-            errors.append(name_r.error)
+            errors.append(FieldError(code=name_r.error, field="full_name"))
 
         if not password_hash:
-            errors.append("PasswordHashCannotBeEmpty")
+            errors.append(FieldError(code="PasswordHashCannotBeEmpty", field="password_hash"))
 
         phone_r = BrazilianPhone.create_if_not_empty(phone)
         if phone_r.is_failure:
-            errors.append(phone_r.error)
+            errors.append(FieldError(code=phone_r.error, field="phone"))
 
         if errors:
-            return Result.failure("; ".join(errors))
+            return Result.failure_many(errors)
 
         return Result.success(cls(
             email=email_r.value,
