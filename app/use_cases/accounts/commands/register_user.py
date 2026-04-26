@@ -1,10 +1,15 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from app.core.config import Settings
 from app.domain.accounts.repository import IUserRepository
 from app.domain.accounts.password_hasher import IPasswordHasher
 from app.domain.accounts.role import Role
 from app.domain.accounts.user import User
 from app.domain.shared.result import Result
+from app.domain.subscriptions.owner_subscription import OwnerSubscription
+from app.domain.subscriptions.repository import ISubscriptionRepository
 from app.use_cases.accounts.dtos import UserDto
 
 
@@ -21,9 +26,17 @@ class RegisterUserCommand:
 
 
 class RegisterUserHandler:
-    def __init__(self, users: IUserRepository, hasher: IPasswordHasher) -> None:
+    def __init__(
+        self,
+        users: IUserRepository,
+        hasher: IPasswordHasher,
+        subscriptions: ISubscriptionRepository,
+        config: Settings,
+    ) -> None:
         self._users = users
         self._hasher = hasher
+        self._subscriptions = subscriptions
+        self._config = config
 
     async def handle(self, cmd: RegisterUserCommand) -> Result[UserDto]:
         if not cmd.role.is_self_registerable():
@@ -57,4 +70,17 @@ class RegisterUserHandler:
 
         user = user_r.value
         await self._users.add(user)
+
+        if user.role is Role.OWNER:
+            sub_r = OwnerSubscription.create_trialing(
+                owner_id=user.id,
+                trial_duration_days=self._config.trial_duration_days,
+                now=datetime.now(timezone.utc),
+            )
+            if sub_r.is_failure:
+                return Result.from_failure(sub_r, status_code=500)
+            add_r = await self._subscriptions.add(sub_r.value)
+            if add_r.is_failure:
+                return Result.from_failure(add_r, status_code=500)
+
         return Result.success(UserDto.from_entity(user), status_code=201)
