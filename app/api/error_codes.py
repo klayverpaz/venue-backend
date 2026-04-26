@@ -27,6 +27,8 @@ from app.domain.shared.value_objects.short_description import ShortDescription
 from app.domain.shared.value_objects.short_name import ShortName
 from app.domain.shared.value_objects.slot_duration import SlotDuration
 from app.domain.shared.value_objects.slug import Slug
+from app.domain.resources.pricing_rule import PricingRule
+from app.domain.resources.weekly_schedule import WeeklySchedule
 from app.domain.shared.value_objects.time_window import TimeWindow
 
 
@@ -94,6 +96,14 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     # TimeWindow
     TimeWindow.TIME_WINDOW_INVALID_TYPE: "Janela de horário em formato inválido.",
     TimeWindow.TIME_WINDOW_START_MUST_BE_BEFORE_END: "Horário inicial deve ser anterior ao final (sem virada de meia-noite).",
+
+    # WeeklySchedule (resource VO)
+    WeeklySchedule.WINDOWS_NOT_ORDERED: "Janelas de horário devem estar em ordem crescente.",
+    WeeklySchedule.WINDOWS_OVERLAP: "Janelas de horário não podem se sobrepor.",
+    WeeklySchedule.WINDOW_NOT_ALIGNED_TO_SLOT_GRID: "Janela de horário não está alinhada à grade de slots.",
+
+    # PricingRule (resource VO)
+    PricingRule.EMPTY_WEEKDAYS: "Regra de preço precisa ter ao menos um dia da semana.",
 
     # DateTimeRange
     DateTimeRange.DATE_TIME_RANGE_INVALID_TYPE: "Intervalo de datas em formato inválido.",
