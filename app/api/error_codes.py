@@ -104,6 +104,9 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES: "Atributo do tipo enum precisa de valores possíveis.",
     AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES: "Atributo que não é enum não pode ter valores possíveis.",
 
+    # Envelope code emitted by unwrap() when result.details is populated
+    "ValidationFailed": "Falha de validação.",
+
     # Handler-level (not VO-bound) codes
     "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
 

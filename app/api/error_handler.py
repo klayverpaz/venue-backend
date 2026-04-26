@@ -13,6 +13,20 @@ logger = logging.getLogger(__name__)
 def unwrap(result: Result[T]) -> T:
     if result.is_success:
         return result.value  # type: ignore[return-value]
+
+    if result.details is not None:
+        raise HTTPException(
+            status_code=result.status_code or 400,
+            detail={
+                "code": "ValidationFailed",
+                "message": translate("ValidationFailed"),
+                "details": [
+                    {"field": e.field, "code": e.code, "message": translate(e.code)}
+                    for e in result.details
+                ],
+            },
+        )
+
     code = result.error or "InternalError"
     raise HTTPException(
         status_code=result.status_code or 500,
