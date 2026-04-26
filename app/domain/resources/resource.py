@@ -242,3 +242,142 @@ class Resource(BaseEntity):
                 ))
 
         return errors
+
+    def update_metadata(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        city: str | None = None,
+        region: str | None = None,
+    ) -> Result[None]:
+        if name is None and description is None and city is None and region is None:
+            return Result.success(None)
+
+        errors: list[FieldError] = []
+        new_name = self.name
+        new_desc = self.description
+        new_city = self.city
+        new_region = self.region
+
+        if name is not None:
+            r = Name.create(name)
+            if r.is_failure:
+                errors.append(FieldError(code=r.error, field="name"))
+            else:
+                new_name = r.value
+
+        if description is not None:
+            r = ShortDescription.create(description)
+            if r.is_failure:
+                errors.append(FieldError(code=r.error, field="description"))
+            else:
+                new_desc = r.value
+
+        if city is not None:
+            r = Name.create(city)
+            if r.is_failure:
+                errors.append(FieldError(code=r.error, field="city"))
+            else:
+                new_city = r.value
+
+        if region is not None:
+            r = Name.create(region)
+            if r.is_failure:
+                errors.append(FieldError(code=r.error, field="region"))
+            else:
+                new_region = r.value
+
+        if errors:
+            return Result.failure_many(errors)
+
+        self.name = new_name
+        self.description = new_desc
+        self.city = new_city
+        self.region = new_region
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def replace_operating_hours(self, hours: WeeklySchedule) -> Result[None]:
+        errors = self._validate_pricing_rules(
+            slot_duration_minutes=self.slot_duration_minutes.minutes,
+            hours=hours,
+            rules=self._pricing_rules,
+        )
+        if errors:
+            return Result.failure_many(errors)
+        self.operating_hours = hours
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def replace_pricing_rules(self, rules: list[PricingRule]) -> Result[None]:
+        errors = self._validate_pricing_rules(
+            slot_duration_minutes=self.slot_duration_minutes.minutes,
+            hours=self.operating_hours,
+            rules=rules,
+        )
+        if errors:
+            return Result.failure_many(errors)
+        self._pricing_rules = list(rules)
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def replace_base_attributes(self, attrs: dict[str, Any]) -> Result[None]:
+        errors = self._validate_custom_attributes(
+            base_attributes=attrs,
+            customs=self._custom_attributes,
+        )
+        if errors:
+            return Result.failure_many(errors)
+        self.base_attributes = dict(attrs)
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def replace_custom_attributes(self, attrs: list[CustomAttribute]) -> Result[None]:
+        errors = self._validate_custom_attributes(
+            base_attributes=self.base_attributes,
+            customs=attrs,
+        )
+        if errors:
+            return Result.failure_many(errors)
+        self._custom_attributes = list(attrs)
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def set_base_price(self, price: Money) -> None:
+        self.base_price_cents = price
+        self.updated_at = _utcnow()
+
+    def set_cancellation_cutoff(self, cutoff: CancellationCutoff) -> None:
+        self.customer_cancellation_cutoff_hours = cutoff
+        self.updated_at = _utcnow()
+
+    def set_slot_duration(self, duration: SlotDuration) -> Result[None]:
+        from app.domain.shared.weekday import Weekday as _Wd
+        rebuilt = WeeklySchedule.create(
+            slot_duration_minutes=duration.minutes,
+            days={wd: list(self.operating_hours.for_weekday(wd)) for wd in _Wd},
+        )
+        if rebuilt.is_failure:
+            return Result.from_failure(rebuilt)
+
+        errors = self._validate_pricing_rules(
+            slot_duration_minutes=duration.minutes,
+            hours=rebuilt.value,
+            rules=self._pricing_rules,
+        )
+        if errors:
+            return Result.failure_many(errors)
+
+        self.slot_duration_minutes = duration
+        self.operating_hours = rebuilt.value
+        self.updated_at = _utcnow()
+        return Result.success(None)
+
+    def publish(self) -> None:
+        self.is_published = True
+        self.updated_at = _utcnow()
+
+    def unpublish(self) -> None:
+        self.is_published = False
+        self.updated_at = _utcnow()
