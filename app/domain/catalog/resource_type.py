@@ -138,39 +138,46 @@ class ResourceType(BaseEntity):
         """Validate a dict of raw values against this type's attribute_schema.
 
         Used by future Plan 06 Resource.create() to validate Resource.base_attributes
-        before persistence. Returns aggregated errors as semicolon-joined codes.
+        before persistence. Returns aggregated errors as Result.failure_many of
+        FieldError, one per failing attribute key.
         """
-        errors: list[str] = []
+        errors: list[FieldError] = []
         defs_by_key = {d.key.value: d for d in self._attribute_schema}
 
         # Required attributes must be present.
         for d in self._attribute_schema:
             if d.required and d.key.value not in values:
-                errors.append(f"{self.REQUIRED_ATTRIBUTE_MISSING}:{d.key.value}")
+                errors.append(FieldError(
+                    code=self.REQUIRED_ATTRIBUTE_MISSING,
+                    field=d.key.value,
+                ))
 
         for key, value in values.items():
             d = defs_by_key.get(key)
             if d is None:
-                errors.append(f"{self.UNKNOWN_ATTRIBUTE_KEY}:{key}")
+                errors.append(FieldError(code=self.UNKNOWN_ATTRIBUTE_KEY, field=key))
                 continue
 
             if d.data_type == AttrType.STRING:
                 if not isinstance(value, str):
-                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+                    errors.append(FieldError(code=self.ATTRIBUTE_TYPE_MISMATCH, field=key))
             elif d.data_type == AttrType.INT:
                 # bool is a subclass of int; reject explicitly.
                 if isinstance(value, bool) or not isinstance(value, int):
-                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+                    errors.append(FieldError(code=self.ATTRIBUTE_TYPE_MISMATCH, field=key))
             elif d.data_type == AttrType.BOOL:
                 if not isinstance(value, bool):
-                    errors.append(f"{self.ATTRIBUTE_TYPE_MISMATCH}:{key}")
+                    errors.append(FieldError(code=self.ATTRIBUTE_TYPE_MISMATCH, field=key))
             elif d.data_type == AttrType.ENUM:
                 allowed = {v.value for v in (d.enum_values or ())}
                 if not isinstance(value, str) or value not in allowed:
-                    errors.append(f"{self.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED}:{key}")
+                    errors.append(FieldError(
+                        code=self.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED,
+                        field=key,
+                    ))
 
         if errors:
-            return Result.failure("; ".join(errors))
+            return Result.failure_many(errors)
         return Result.success(None)
 
     @staticmethod

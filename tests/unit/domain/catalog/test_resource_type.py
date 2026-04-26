@@ -216,8 +216,10 @@ def test_resource_type_validate_attributes_required_missing():
     ).value
     r = rt.validate_attributes({})
     assert r.is_failure
-    assert ResourceType.REQUIRED_ATTRIBUTE_MISSING in r.error
-    assert "players" in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("players", ResourceType.REQUIRED_ATTRIBUTE_MISSING) in codes
 
 
 def test_resource_type_validate_attributes_type_mismatch_int():
@@ -227,7 +229,10 @@ def test_resource_type_validate_attributes_type_mismatch_int():
     ).value
     r = rt.validate_attributes({"players": "ten"})
     assert r.is_failure
-    assert ResourceType.ATTRIBUTE_TYPE_MISMATCH in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("players", ResourceType.ATTRIBUTE_TYPE_MISMATCH) in codes
 
 
 def test_resource_type_validate_attributes_type_mismatch_bool():
@@ -237,7 +242,10 @@ def test_resource_type_validate_attributes_type_mismatch_bool():
     ).value
     r = rt.validate_attributes({"lit": "yes"})
     assert r.is_failure
-    assert ResourceType.ATTRIBUTE_TYPE_MISMATCH in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("lit", ResourceType.ATTRIBUTE_TYPE_MISMATCH) in codes
 
 
 def test_resource_type_validate_attributes_enum_value_in_set():
@@ -255,7 +263,10 @@ def test_resource_type_validate_attributes_enum_value_not_in_set():
     ).value
     r = rt.validate_attributes({"surface": "concrete"})
     assert r.is_failure
-    assert ResourceType.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("surface", ResourceType.ATTRIBUTE_ENUM_VALUE_NOT_ALLOWED) in codes
 
 
 def test_resource_type_validate_attributes_unknown_key():
@@ -265,7 +276,10 @@ def test_resource_type_validate_attributes_unknown_key():
     ).value
     r = rt.validate_attributes({"size": "ok", "unknown": "value"})
     assert r.is_failure
-    assert ResourceType.UNKNOWN_ATTRIBUTE_KEY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("unknown", ResourceType.UNKNOWN_ATTRIBUTE_KEY) in codes
 
 
 def test_resource_type_validate_attributes_optional_absent_is_ok():
