@@ -17,4 +17,7 @@ class UserModel(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    public_slug: Mapped[str | None] = mapped_column(
+        Text, nullable=True, unique=True, index=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence
+from typing import Iterable, Sequence
 from uuid import UUID
 from app.domain.accounts.user import User
 from app.domain.accounts.repository import IUserRepository
@@ -18,6 +18,16 @@ class InMemoryUserRepository(IUserRepository):
             if str(u.email) == target:
                 return u
         return None
+
+    async def get_by_public_slug(self, public_slug: str) -> User | None:
+        for u in self._by_id.values():
+            if u.public_slug is not None and u.public_slug.value == public_slug:
+                return u
+        return None
+
+    async def list_by_ids(self, ids: Iterable[UUID]) -> list[User]:
+        ids_set = set(ids)
+        return [u for u in self._by_id.values() if u.id in ids_set]
 
     async def list_active(self, *, limit: int = 50, offset: int = 0) -> Sequence[User]:
         active = [u for u in self._by_id.values() if u.is_active]
