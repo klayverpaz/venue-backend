@@ -43,20 +43,20 @@ class RegisterUserHandler:
     async def handle(self, cmd: RegisterUserCommand) -> Result[UserDto]:
         if not cmd.role.is_self_registerable():
             return Result.failure(
-                "Não é permitido registrar contas admin via cadastro público.",
+                "AdminRegistrationForbidden",
                 status_code=403,
             )
 
         if len(cmd.password) < MIN_PASSWORD_LENGTH:
             return Result.failure(
-                f"Senha precisa ter ao menos {MIN_PASSWORD_LENGTH} caracteres.",
+                "PasswordTooShort",
                 status_code=422,
             )
 
         existing = await self._users.get_by_email(cmd.email)
         if existing is not None:
             return Result.failure(
-                f"Email já cadastrado: {cmd.email}",
+                "EmailAlreadyRegistered",
                 status_code=409,
             )
 

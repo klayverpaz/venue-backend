@@ -92,7 +92,7 @@ async def test_register_admin_rejected():
     ))
     assert r.is_failure
     assert r.status_code == 403
-    assert "admin" in r.error.lower()
+    assert r.error == "AdminRegistrationForbidden"
 
 
 @pytest.mark.asyncio
@@ -108,6 +108,7 @@ async def test_register_email_collision():
     ))
     assert r.is_failure
     assert r.status_code == 409
+    assert r.error == "EmailAlreadyRegistered"
 
 
 @pytest.mark.asyncio
@@ -119,7 +120,7 @@ async def test_register_short_password():
     ))
     assert r.is_failure
     assert r.status_code == 422
-    assert "senha" in r.error.lower() or "password" in r.error.lower()
+    assert r.error == "PasswordTooShort"
 
 
 @pytest.mark.asyncio
@@ -258,3 +259,53 @@ async def test_customer_registration_no_slug(
     assert r.is_success
     user = await user_repo.get_by_id(r.value.id)
     assert user.public_slug is None
+
+
+@pytest.mark.asyncio
+async def test_register_admin_via_public_endpoint_rejected(
+    user_repo, sub_repo, hasher, settings,
+):
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    cmd = RegisterUserCommand(
+        email="a@example.com", password="senha-forte-1", role=Role.ADMIN,
+        full_name="Admin", phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_failure
+    assert r.error == "AdminRegistrationForbidden"
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_register_password_too_short(
+    user_repo, sub_repo, hasher, settings,
+):
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    cmd = RegisterUserCommand(
+        email="x@example.com", password="123", role=Role.CUSTOMER,
+        full_name="X", phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_failure
+    assert r.error == "PasswordTooShort"
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_email_already_registered(
+    user_repo, sub_repo, hasher, settings,
+):
+    existing = User.create(
+        email="dup@example.com", password_hash="x", role=Role.CUSTOMER,
+        full_name="Existing", phone=None, public_slug=None,
+    ).value
+    await user_repo.add(existing)
+    handler = RegisterUserHandler(user_repo, hasher, sub_repo, settings)
+    cmd = RegisterUserCommand(
+        email="dup@example.com", password="senha-forte-1", role=Role.CUSTOMER,
+        full_name="New", phone=None,
+    )
+    r = await handler.handle(cmd)
+    assert r.is_failure
+    assert r.error == "EmailAlreadyRegistered"
+    assert r.status_code == 409

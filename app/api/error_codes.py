@@ -136,6 +136,11 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     # Handler-level (not VO-bound) codes
     "PasswordHashCannotBeEmpty": "Hash de senha é obrigatório.",
 
+    # Plan 05 follow-up #5 — RegisterUserHandler stable codes
+    "AdminRegistrationForbidden": "Não é permitido registrar contas admin via cadastro público.",
+    "PasswordTooShort": "Senha precisa ter ao menos 8 caracteres.",
+    "EmailAlreadyRegistered": "Email já cadastrado.",
+
     # Resource handler-level (Plan 06)
     "PublicSlugAlreadyTaken": "Slug público já em uso.",
     "ResourceNotFound": "Recurso não encontrado.",

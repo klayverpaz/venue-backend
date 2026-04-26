@@ -109,6 +109,10 @@ def test_no_orphan_translations_in_mapping():
         "TrialDurationDaysInvalid",
         "StatusChangedAtMustBeTzAware",
         "TrialEndsAtMustBeTzAware",
+        # Plan 05 follow-up #5 — RegisterUserHandler stable codes
+        "AdminRegistrationForbidden",
+        "PasswordTooShort",
+        "EmailAlreadyRegistered",
         # Plan 06 — resources + accounts extension
         "PublicSlugRequiredForOwner",
         "PublicSlugForbiddenForNonOwner",
