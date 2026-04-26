@@ -122,12 +122,19 @@ class Resource(BaseEntity):
         if cutoff_r.is_failure:
             errors.append(FieldError(code=cutoff_r.error, field="customer_cancellation_cutoff_hours"))
 
-        # Cross-rule pricing checks happen AFTER scalar VO validation succeeds
-        # because they need slot_r.value and operating_hours intact.
-        # Implemented in Task 6.
+        # Cross-rule pricing checks (only run if scalars are sane enough to compute).
+        if slot_r.is_success:
+            errors.extend(cls._validate_pricing_rules(
+                slot_duration_minutes=slot_r.value.minutes,
+                hours=operating_hours,
+                rules=pricing_rules,
+            ))
 
-        # Custom attributes uniqueness + disjoint-with-base
-        # Implemented in Task 6.
+        # Custom attribute uniqueness + disjoint-with-base.
+        errors.extend(cls._validate_custom_attributes(
+            base_attributes=base_attributes,
+            customs=custom_attributes,
+        ))
 
         if errors:
             return Result.failure_many(errors)
@@ -158,3 +165,80 @@ class Resource(BaseEntity):
     @property
     def custom_attributes(self) -> tuple[CustomAttribute, ...]:
         return tuple(self._custom_attributes)
+
+    @staticmethod
+    def _validate_pricing_rules(
+        *,
+        slot_duration_minutes: int,
+        hours: WeeklySchedule,
+        rules: list[PricingRule],
+    ) -> list[FieldError]:
+        errors: list[FieldError] = []
+
+        for idx, rule in enumerate(rules):
+            field = f"pricing_rules[{idx}]"
+
+            # Alignment.
+            start_min = rule.window.start.hour * 60 + rule.window.start.minute
+            duration = rule.window.duration_minutes()
+            if (start_min % slot_duration_minutes) != 0 or (duration % slot_duration_minutes) != 0:
+                errors.append(FieldError(
+                    code=Resource.PRICING_RULE_NOT_ALIGNED_TO_SLOT_GRID,
+                    field=field,
+                ))
+
+            # Containment: for each weekday in this rule, the rule's window must
+            # fit inside at least one operating window for that weekday.
+            for wd in rule.weekdays:
+                day_windows = hours.for_weekday(wd)
+                contained = any(
+                    op.start <= rule.window.start and rule.window.end <= op.end
+                    for op in day_windows
+                )
+                if not contained:
+                    errors.append(FieldError(
+                        code=Resource.PRICING_RULE_OUTSIDE_OPERATING_HOURS,
+                        field=field,
+                    ))
+                    break  # one error per rule is enough
+
+            # Overlap: this rule vs every previous rule on a shared weekday.
+            for prev_idx in range(idx):
+                prev = rules[prev_idx]
+                shared = rule.weekdays & prev.weekdays
+                if not shared:
+                    continue
+                # Time overlap: half-open intersection
+                if rule.window.start < prev.window.end and prev.window.start < rule.window.end:
+                    errors.append(FieldError(
+                        code=Resource.PRICING_RULES_OVERLAP,
+                        field=field,
+                    ))
+                    break
+
+        return errors
+
+    @staticmethod
+    def _validate_custom_attributes(
+        *,
+        base_attributes: dict[str, Any],
+        customs: list[CustomAttribute],
+    ) -> list[FieldError]:
+        errors: list[FieldError] = []
+        seen: set[str] = set()
+        base_keys = set(base_attributes.keys())
+
+        for idx, attr in enumerate(customs):
+            field = f"custom_attributes[{idx}]"
+            key = attr.key.value
+            if key in seen:
+                errors.append(FieldError(
+                    code=Resource.DUPLICATE_CUSTOM_ATTRIBUTE_KEY, field=field,
+                ))
+            seen.add(key)
+            if key in base_keys:
+                errors.append(FieldError(
+                    code=Resource.CUSTOM_ATTRIBUTE_KEY_CONFLICTS_WITH_BASE, field=field,
+                ))
+
+        return errors

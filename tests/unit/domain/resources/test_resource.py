@@ -15,6 +15,10 @@ def _w(sh: int, eh: int) -> TimeWindow:
     return TimeWindow.create(time(sh, 0), time(eh, 0)).value
 
 
+def _w_min(sh: int, sm: int, eh: int, em: int) -> TimeWindow:
+    return TimeWindow.create(time(sh, sm), time(eh, em)).value
+
+
 def _money(cents: int) -> Money:
     return Money.create(cents).value
 
@@ -81,3 +85,67 @@ def test_create_aggregates_scalar_vo_errors():
     assert "name" in fields
     assert "timezone" in fields
     assert "base_price_cents" in fields
+
+
+# --- cross-rule pricing checks ---
+
+def test_create_rejects_overlapping_pricing_rules():
+    rule_a = PricingRule.create(
+        weekdays=[Weekday.FRIDAY], window=_w(18, 22), price=_money(12000),
+    ).value
+    rule_b = PricingRule.create(
+        weekdays=[Weekday.FRIDAY], window=_w(20, 23), price=_money(15000),
+    ).value
+    r = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.FRIDAY: [_w(8, 23)]}),
+        pricing_rules=[rule_a, rule_b],
+    ))
+    assert r.is_failure
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("pricing_rules[1]", Resource.PRICING_RULES_OVERLAP) in codes
+
+
+def test_create_rejects_pricing_rule_misaligned():
+    rule = PricingRule.create(
+        weekdays=[Weekday.FRIDAY], window=_w_min(18, 30, 22, 0), price=_money(12000),
+    ).value
+    r = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.FRIDAY: [_w(8, 23)]}),
+        pricing_rules=[rule],
+    ))
+    assert r.is_failure
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("pricing_rules[0]", Resource.PRICING_RULE_NOT_ALIGNED_TO_SLOT_GRID) in codes
+
+
+def test_create_rejects_pricing_rule_outside_operating_hours():
+    rule = PricingRule.create(
+        weekdays=[Weekday.FRIDAY], window=_w(2, 4), price=_money(12000),
+    ).value
+    r = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.FRIDAY: [_w(18, 23)]}),
+        pricing_rules=[rule],
+    ))
+    assert r.is_failure
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("pricing_rules[0]", Resource.PRICING_RULE_OUTSIDE_OPERATING_HOURS) in codes
+
+
+def test_create_rejects_duplicate_custom_attribute_keys():
+    a = CustomAttribute.create(key="wifi", label="Wi-Fi", value="sim").value
+    b = CustomAttribute.create(key="wifi", label="Wi-Fi 5G", value="sim").value
+    r = Resource.create(**_valid_kwargs(custom_attributes=[a, b]))
+    assert r.is_failure
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("custom_attributes[1]", Resource.DUPLICATE_CUSTOM_ATTRIBUTE_KEY) in codes
+
+
+def test_create_rejects_custom_attribute_key_conflicting_with_base():
+    a = CustomAttribute.create(key="wifi", label="Wi-Fi", value="sim").value
+    r = Resource.create(**_valid_kwargs(
+        base_attributes={"wifi": True},
+        custom_attributes=[a],
+    ))
+    assert r.is_failure
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("custom_attributes[0]", Resource.CUSTOM_ATTRIBUTE_KEY_CONFLICTS_WITH_BASE) in codes
