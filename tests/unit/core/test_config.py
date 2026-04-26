@@ -1,5 +1,6 @@
 import pytest
-from app.core.config import get_settings
+from pydantic import ValidationError
+from app.core.config import get_settings, Settings
 
 
 def test_settings_carrega_env_com_prefix_backend(monkeypatch):
@@ -40,3 +41,27 @@ def test_settings_exige_database_url(monkeypatch, tmp_path):
     finally:
         Settings.model_config["env_file"] = original
         get_settings.cache_clear()
+
+
+def test_trial_duration_days_default_is_3(monkeypatch):
+    monkeypatch.setenv("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.delenv("BACKEND_TRIAL_DURATION_DAYS", raising=False)
+    get_settings.cache_clear()
+    s = Settings()
+    assert s.trial_duration_days == 3
+
+
+def test_trial_duration_days_env_override(monkeypatch):
+    monkeypatch.setenv("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("BACKEND_TRIAL_DURATION_DAYS", "7")
+    get_settings.cache_clear()
+    s = Settings()
+    assert s.trial_duration_days == 7
+
+
+def test_trial_duration_days_must_be_positive(monkeypatch):
+    monkeypatch.setenv("BACKEND_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("BACKEND_TRIAL_DURATION_DAYS", "0")
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError):
+        Settings()

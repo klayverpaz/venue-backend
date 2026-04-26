@@ -2,7 +2,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DOTENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     argon2_time_cost: int = 3
     argon2_memory_cost_kib: int = 12_288
     argon2_parallelism: int = 1
+
+    # Subscriptions
+    trial_duration_days: int = Field(default=3, gt=0)
 
     model_config = SettingsConfigDict(
         env_prefix="BACKEND_",
