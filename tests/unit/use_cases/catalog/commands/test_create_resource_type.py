@@ -40,7 +40,35 @@ async def test_create_resource_type_propagates_slug_failure():
     handler = CreateResourceTypeHandler(repo)
     r = await handler.handle(_cmd(slug="Invalid Slug!"))
     assert r.is_failure
-    assert "SlugInvalidFormat" in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("slug", "SlugInvalidFormat") in codes
+
+
+async def test_create_resource_type_aggregates_attribute_schema_failures():
+    """Handler aggregates per-element AttributeDefinition.create failures and
+    InvalidDataType branches, returning structured FieldError per row."""
+    repo = InMemoryResourceTypeRepository()
+    handler = CreateResourceTypeHandler(repo)
+    r = await handler.handle(_cmd(
+        attribute_schema=[
+            {"key": "ok", "label": "OK", "data_type": "not-a-type",
+             "required": False, "enum_values": None},
+            {"key": "BAD KEY", "label": "Bad", "data_type": "string",
+             "required": False, "enum_values": None},
+        ],
+    ))
+    assert r.is_failure
+    assert r.status_code == 400
+    assert r.error is None
+    assert r.details is not None
+    fields = {e.field for e in r.details}
+    assert "attribute_schema[0].data_type" in fields
+    # The second row has an invalid AttributeKey (uppercase + space).
+    assert any(f == "attribute_schema[1]" for f in fields)
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("attribute_schema[0].data_type", "InvalidDataType") in codes
 
 
 async def test_create_resource_type_rejects_duplicate_slug():

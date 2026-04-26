@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.field_error import FieldError
 from app.domain.shared.result import Result
 from app.use_cases.catalog.dtos import ResourceTypeDto
 
@@ -27,12 +28,15 @@ class CreateResourceTypeHandler:
     async def handle(self, cmd: CreateResourceTypeCommand) -> Result[ResourceTypeDto]:
         # Build AttributeDefinition VOs from raw dict input.
         defs: list[AttributeDefinition] = []
-        errors: list[str] = []
-        for raw in cmd.attribute_schema:
+        errors: list[FieldError] = []
+        for idx, raw in enumerate(cmd.attribute_schema):
             try:
                 dt = AttrType(raw["data_type"])
             except ValueError:
-                errors.append(f"InvalidDataType:{raw.get('data_type')!r}")
+                errors.append(FieldError(
+                    code="InvalidDataType",
+                    field=f"attribute_schema[{idx}].data_type",
+                ))
                 continue
             r = AttributeDefinition.create(
                 key=raw["key"],
@@ -42,12 +46,12 @@ class CreateResourceTypeHandler:
                 enum_values=raw.get("enum_values"),
             )
             if r.is_failure:
-                errors.append(r.error)
+                errors.append(FieldError(code=r.error, field=f"attribute_schema[{idx}]"))
             else:
                 defs.append(r.value)
 
         if errors:
-            return Result.failure("; ".join(errors), status_code=400)
+            return Result.failure_many(errors, status_code=400)
 
         rt_r = ResourceType.create(
             slug=cmd.slug,
@@ -57,7 +61,7 @@ class CreateResourceTypeHandler:
             is_active=cmd.is_active,
         )
         if rt_r.is_failure:
-            return Result.failure(rt_r.error, status_code=400)
+            return Result.from_failure(rt_r, status_code=400)
 
         add_r = await self._repo.add(rt_r.value)
         if add_r.is_failure:
