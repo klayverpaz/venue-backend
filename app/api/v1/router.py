@@ -13,6 +13,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.catalog.routes import router as catalog_router
 from app.api.v1.me_subscription.routes import router as me_subscription_router
 from app.api.v1.me_resources.routes import router as me_resources_router
+from app.api.v1.public_resources.routes import router as public_resources_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -22,3 +23,4 @@ api_router.include_router(admin_subscriptions_router)
 api_router.include_router(catalog_router)
 api_router.include_router(me_subscription_router)
 api_router.include_router(me_resources_router)
+api_router.include_router(public_resources_router)
