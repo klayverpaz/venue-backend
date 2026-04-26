@@ -53,7 +53,7 @@ class RegisterUserHandler:
             phone=cmd.phone,
         )
         if user_r.is_failure:
-            return Result.failure(user_r.error, status_code=422)
+            return Result.from_failure(user_r, status_code=422)
 
         user = user_r.value
         await self._users.add(user)

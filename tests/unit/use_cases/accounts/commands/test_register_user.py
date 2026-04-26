@@ -98,3 +98,20 @@ async def test_register_invalid_email():
     ))
     assert r.is_failure
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_user_propagates_user_create_details():
+    """User.create emits failure_many; the handler must preserve r.details."""
+    handler, _, _ = make_handler()
+    r = await handler.handle(RegisterUserCommand(
+        email="not-an-email", password="hunter2-strong",
+        role=Role.CUSTOMER, full_name="", phone=None,
+    ))
+    assert r.is_failure
+    assert r.status_code == 422
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("email", "EmailInvalidFormat") in codes
+    assert ("full_name", "NameCannotBeEmpty") in codes
