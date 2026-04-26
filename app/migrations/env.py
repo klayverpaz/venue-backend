@@ -12,6 +12,7 @@ from app.infrastructure.db.base import Base
 # Registra modelos em Base.metadata (imports com side-effect).
 # Adicionar novo model = adicionar o import aqui.
 from app.infrastructure.db.mappings import owner_subscription  # noqa: F401
+from app.infrastructure.db.mappings import resource  # noqa: F401
 from app.infrastructure.db.mappings import resource_type  # noqa: F401  (registers metadata)
 from app.infrastructure.db.mappings import user  # noqa: F401
 
