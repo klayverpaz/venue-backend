@@ -84,7 +84,10 @@ async def test_update_propagates_attribute_schema_validation_failure():
         ],
     ))
     assert r.is_failure
-    assert "DuplicateAttributeKey" in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("attribute_schema", "DuplicateAttributeKey") in codes
 
 
 async def test_update_propagates_name_validation_failure():
@@ -92,4 +95,30 @@ async def test_update_propagates_name_validation_failure():
     handler = UpdateResourceTypeHandler(repo)
     r = await handler.handle(UpdateResourceTypeCommand(id=rt.id, name=""))
     assert r.is_failure
-    assert "NameCannotBeEmpty" in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("name", "NameCannotBeEmpty") in codes
+
+
+async def test_update_aggregates_attribute_schema_per_row_failures():
+    repo, rt = await _setup_repo_with_one()
+    handler = UpdateResourceTypeHandler(repo)
+    r = await handler.handle(UpdateResourceTypeCommand(
+        id=rt.id,
+        attribute_schema=[
+            {"key": "ok", "label": "OK", "data_type": "not-a-type",
+             "required": False, "enum_values": None},
+            {"key": "BAD KEY", "label": "Bad", "data_type": "string",
+             "required": False, "enum_values": None},
+        ],
+    ))
+    assert r.is_failure
+    assert r.status_code == 400
+    assert r.error is None
+    assert r.details is not None
+    fields = {e.field for e in r.details}
+    assert "attribute_schema[0].data_type" in fields
+    assert "attribute_schema[1]" in fields
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("attribute_schema[0].data_type", "InvalidDataType") in codes

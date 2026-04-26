@@ -4,6 +4,7 @@ from typing import Any, Protocol
 from uuid import UUID
 from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
+from app.domain.shared.field_error import FieldError
 from app.domain.shared.result import Result
 from app.use_cases.catalog.dtos import ResourceTypeDto
 
@@ -34,16 +35,19 @@ class UpdateResourceTypeHandler:
         if cmd.name is not None or cmd.description is not None:
             metadata_r = rt.update_metadata(name=cmd.name, description=cmd.description)
             if metadata_r.is_failure:
-                return Result.failure(metadata_r.error, status_code=400)
+                return Result.from_failure(metadata_r, status_code=400)
 
         if cmd.attribute_schema is not None:
             defs: list[AttributeDefinition] = []
-            errors: list[str] = []
-            for raw in cmd.attribute_schema:
+            errors: list[FieldError] = []
+            for idx, raw in enumerate(cmd.attribute_schema):
                 try:
                     dt = AttrType(raw["data_type"])
                 except ValueError:
-                    errors.append(f"InvalidDataType:{raw.get('data_type')!r}")
+                    errors.append(FieldError(
+                        code="InvalidDataType",
+                        field=f"attribute_schema[{idx}].data_type",
+                    ))
                     continue
                 r = AttributeDefinition.create(
                     key=raw["key"],
@@ -53,15 +57,15 @@ class UpdateResourceTypeHandler:
                     enum_values=raw.get("enum_values"),
                 )
                 if r.is_failure:
-                    errors.append(r.error)
+                    errors.append(FieldError(code=r.error, field=f"attribute_schema[{idx}]"))
                 else:
                     defs.append(r.value)
             if errors:
-                return Result.failure("; ".join(errors), status_code=400)
+                return Result.failure_many(errors, status_code=400)
 
             replace_r = rt.replace_attribute_schema(defs)
             if replace_r.is_failure:
-                return Result.failure(replace_r.error, status_code=400)
+                return Result.from_failure(replace_r, status_code=400)
 
         if cmd.is_active is not None:
             if cmd.is_active:
