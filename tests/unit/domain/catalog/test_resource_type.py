@@ -184,7 +184,10 @@ def test_resource_type_replace_attribute_schema_rejects_duplicates():
     ).value
     r = rt.replace_attribute_schema([_ad("size", "A"), _ad("size", "B")])
     assert r.is_failure
-    assert r.error == ResourceType.DUPLICATE_ATTRIBUTE_KEY
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("attribute_schema", ResourceType.DUPLICATE_ATTRIBUTE_KEY) in codes
 
 
 def test_resource_type_activate_deactivate():

@@ -112,10 +112,16 @@ class ResourceType(BaseEntity):
         return Result.success(None)
 
     def replace_attribute_schema(self, definitions: Iterable[AttributeDefinition]) -> Result[None]:
-        """Wholesale replacement. Enforces unique-key invariant — returns Result[None]."""
+        """Wholesale replacement. Enforces unique-key invariant — returns Result[None].
+
+        Emits via failure_many for envelope-shape consistency with
+        ResourceType.create, even though only one rule can fail here.
+        """
         defs = list(definitions)
         if self._has_duplicate_keys(defs):
-            return Result.failure(self.DUPLICATE_ATTRIBUTE_KEY)
+            return Result.failure_many([
+                FieldError(code=self.DUPLICATE_ATTRIBUTE_KEY, field="attribute_schema"),
+            ])
         self._attribute_schema = defs
         self.updated_at = _utcnow()
         return Result.success(None)
