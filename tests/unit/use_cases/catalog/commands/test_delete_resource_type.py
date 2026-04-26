@@ -1,7 +1,6 @@
 from __future__ import annotations
 from uuid import uuid4
 import pytest
-from app.domain.catalog.attribute import AttrType, AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
 from app.use_cases.catalog.commands.delete_resource_type import (
     DeleteResourceTypeCommand,

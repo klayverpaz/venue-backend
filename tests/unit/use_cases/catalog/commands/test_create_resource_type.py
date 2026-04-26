@@ -1,6 +1,5 @@
 from __future__ import annotations
 import pytest
-from app.domain.catalog.attribute import AttrType
 from app.use_cases.catalog.commands.create_resource_type import (
     CreateResourceTypeCommand,
     CreateResourceTypeHandler,

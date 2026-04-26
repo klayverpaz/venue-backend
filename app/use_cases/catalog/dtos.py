@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
-from app.domain.catalog.attribute import AttrType, AttributeDefinition
+from app.domain.catalog.attribute import AttributeDefinition
 from app.domain.catalog.resource_type import ResourceType
 
 
