@@ -20,9 +20,6 @@ class RegisterRequest(BaseModel):
     # does not duplicate length checks on VO-backed fields.
     full_name: str
     phone: str | None = None
-    # public_slug is mandatory for owner, forbidden for customer. Domain layer
-    # enforces the cross-field invariant; API passes it through transparently.
-    public_slug: str | None = None
 
 
 class LoginRequest(BaseModel):

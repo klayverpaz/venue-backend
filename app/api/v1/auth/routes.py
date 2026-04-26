@@ -37,7 +37,6 @@ async def register(
         email=req.email, password=req.password,
         role=Role(req.role),
         full_name=req.full_name, phone=req.phone,
-        public_slug=req.public_slug,
     )))
     return UserResponse.from_dto(dto)
 

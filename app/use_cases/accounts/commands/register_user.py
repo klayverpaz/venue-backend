@@ -23,7 +23,6 @@ class RegisterUserCommand:
     role: Role
     full_name: str
     phone: str | None
-    public_slug: str | None = None
 
 
 class RegisterUserHandler:
@@ -65,7 +64,6 @@ class RegisterUserHandler:
             role=cmd.role,
             full_name=cmd.full_name,
             phone=cmd.phone,
-            public_slug=cmd.public_slug,
         )
         if user_r.is_failure:
             return Result.from_failure(user_r, status_code=422)
