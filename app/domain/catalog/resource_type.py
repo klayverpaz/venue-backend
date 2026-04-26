@@ -79,31 +79,32 @@ class ResourceType(BaseEntity):
 
         VO validation failures are entity-level invariants ("name is always a
         valid Name"), so this returns Result[None] per spec §4.4. Aggregates
-        failures across both fields. No-op when both args are None.
+        failures across both fields via failure_many. No-op when both args
+        are None.
         """
         if name is None and description is None:
             return Result.success(None)
 
-        errors: list[str] = []
+        errors: list[FieldError] = []
         new_name = self.name
         new_desc = self.description
 
         if name is not None:
             r = Name.create(name)
             if r.is_failure:
-                errors.append(r.error)
+                errors.append(FieldError(code=r.error, field="name"))
             else:
                 new_name = r.value
 
         if description is not None:
             r = ShortDescription.create(description)
             if r.is_failure:
-                errors.append(r.error)
+                errors.append(FieldError(code=r.error, field="description"))
             else:
                 new_desc = r.value
 
         if errors:
-            return Result.failure("; ".join(errors))
+            return Result.failure_many(errors)
 
         self.name = new_name
         self.description = new_desc

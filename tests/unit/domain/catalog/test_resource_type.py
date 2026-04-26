@@ -131,7 +131,29 @@ def test_resource_type_update_metadata_propagates_name_failure():
     ).value
     r = rt.update_metadata(name="")
     assert r.is_failure
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("name", Name.NAME_CANNOT_BE_EMPTY) in codes
     # Entity should not have mutated.
+    assert rt.name.value == "Football Field"
+
+
+def test_resource_type_update_metadata_aggregates_failures():
+    rt = ResourceType.create(
+        slug="football-field", name="Football Field", description="", attribute_schema=[],
+    ).value
+    r = rt.update_metadata(
+        name="",
+        description="x" * (ShortDescription.MAX_LENGTH + 1),
+    )
+    assert r.is_failure
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("name", Name.NAME_CANNOT_BE_EMPTY) in codes
+    assert ("description", ShortDescription.SHORT_DESCRIPTION_CANNOT_BE_GREATER_THAN_MAX_LENGTH) in codes
+    # Entity not mutated.
     assert rt.name.value == "Football Field"
 
 
