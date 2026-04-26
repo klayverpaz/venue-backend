@@ -279,3 +279,68 @@ def test_soft_delete_naive_datetime_rejected():
     r = res.soft_delete(now=naive)
     assert r.is_failure
     assert r.error == Resource.DELETED_AT_NOT_TZ_AWARE
+
+
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
+from app.domain.shared.value_objects.date_time_range import DateTimeRange
+
+
+def _utc(year, month, day, hour=0, minute=0):
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+
+
+def test_compute_price_falls_back_to_base():
+    # No pricing rules → every slot uses base_price_cents.
+    res = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.MONDAY: [_w(8, 22)]}),
+        base_price_cents=8000,
+    )).value
+    # Monday 2026-04-27 in São Paulo, 09:00-11:00 local = 12:00-14:00 UTC.
+    sao_paulo = ZoneInfo("America/Sao_Paulo")
+    start_local = datetime(2026, 4, 27, 9, 0, tzinfo=sao_paulo)
+    end_local = datetime(2026, 4, 27, 11, 0, tzinfo=sao_paulo)
+    rng = DateTimeRange.create(start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)).value
+    total = res.compute_price(rng)
+    assert total.cents == 8000 * 2  # 2 slots × R$ 80
+
+
+def test_compute_price_uses_matching_rule():
+    rule = PricingRule.create(
+        weekdays=[Weekday.MONDAY],
+        window=_w(18, 22),
+        price=_money(12000),
+    ).value
+    res = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.MONDAY: [_w(8, 22)]}),
+        base_price_cents=8000,
+        pricing_rules=[rule],
+    )).value
+    # Monday local 18:00-20:00 → 2 slots × R$ 120
+    sao_paulo = ZoneInfo("America/Sao_Paulo")
+    start_local = datetime(2026, 4, 27, 18, 0, tzinfo=sao_paulo)
+    end_local = datetime(2026, 4, 27, 20, 0, tzinfo=sao_paulo)
+    rng = DateTimeRange.create(start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)).value
+    total = res.compute_price(rng)
+    assert total.cents == 12000 * 2
+
+
+def test_compute_price_mixed_rule_and_fallback():
+    rule = PricingRule.create(
+        weekdays=[Weekday.MONDAY],
+        window=_w(18, 22),
+        price=_money(12000),
+    ).value
+    res = Resource.create(**_valid_kwargs(
+        operating_hours=_ws(days={Weekday.MONDAY: [_w(8, 22)]}),
+        base_price_cents=8000,
+        pricing_rules=[rule],
+    )).value
+    # Monday local 17:00-19:00 → slot 17 falls outside rule (rule starts 18) → base; slot 18 → rule.
+    sao_paulo = ZoneInfo("America/Sao_Paulo")
+    start_local = datetime(2026, 4, 27, 17, 0, tzinfo=sao_paulo)
+    end_local = datetime(2026, 4, 27, 19, 0, tzinfo=sao_paulo)
+    rng = DateTimeRange.create(start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)).value
+    total = res.compute_price(rng)
+    assert total.cents == 8000 + 12000

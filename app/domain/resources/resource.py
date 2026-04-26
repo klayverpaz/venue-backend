@@ -1,8 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Self
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from app.domain.resources.custom_attribute import CustomAttribute
 from app.domain.resources.pricing_rule import PricingRule
@@ -11,12 +12,14 @@ from app.domain.shared.entity import BaseEntity
 from app.domain.shared.field_error import FieldError
 from app.domain.shared.result import Result
 from app.domain.shared.value_objects.cancellation_cutoff import CancellationCutoff
+from app.domain.shared.value_objects.date_time_range import DateTimeRange
 from app.domain.shared.value_objects.iana_timezone import IanaTimezone
 from app.domain.shared.value_objects.money import Money
 from app.domain.shared.value_objects.name import Name
 from app.domain.shared.value_objects.short_description import ShortDescription
 from app.domain.shared.value_objects.slot_duration import SlotDuration
 from app.domain.shared.value_objects.slug import Slug
+from app.domain.shared.weekday import Weekday
 
 
 def _utcnow() -> datetime:
@@ -393,3 +396,49 @@ class Resource(BaseEntity):
 
     def is_deleted(self) -> bool:
         return self.deleted_at is not None
+
+    def compute_price(self, slot_range: DateTimeRange) -> Money:
+        """Sum of per-slot prices.
+
+        For each slot inside slot_range:
+          - Convert slot_start (UTC) to the resource's timezone via astimezone.
+          - Match a PricingRule when: weekday in rule.weekdays AND
+            rule.window.start <= local_time_of_day < rule.window.end (half-open).
+            The no-overlap invariant guarantees at most one rule matches.
+          - Fall back to base_price_cents when no rule matches.
+        """
+        tz = ZoneInfo(self.timezone.value)
+        slot_minutes = self.slot_duration_minutes.minutes
+        delta = timedelta(minutes=slot_minutes)
+        total = 0
+
+        cursor = slot_range.start_at
+        while cursor < slot_range.end_at:
+            local = cursor.astimezone(tz)
+            wd_local = _PYTHON_WD_TO_VO[local.weekday()]
+            tod = local.time()
+
+            matched: PricingRule | None = None
+            for rule in self._pricing_rules:
+                if wd_local not in rule.weekdays:
+                    continue
+                if rule.window.start <= tod < rule.window.end:
+                    matched = rule
+                    break
+
+            total += matched.price.cents if matched else self.base_price_cents.cents
+            cursor += delta
+
+        return Money.create(total).value
+
+
+# Map Python's datetime.weekday() (Mon=0..Sun=6) to our Weekday VO.
+_PYTHON_WD_TO_VO = {
+    0: Weekday.MONDAY,
+    1: Weekday.TUESDAY,
+    2: Weekday.WEDNESDAY,
+    3: Weekday.THURSDAY,
+    4: Weekday.FRIDAY,
+    5: Weekday.SATURDAY,
+    6: Weekday.SUNDAY,
+}
