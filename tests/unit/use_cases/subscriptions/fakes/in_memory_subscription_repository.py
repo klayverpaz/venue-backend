@@ -51,3 +51,7 @@ class InMemorySubscriptionRepository:
             and s.trial_ends_at is not None
             and s.trial_ends_at < threshold
         ]
+
+    async def list_by_owner_ids(self, owner_ids):
+        ids_set = set(owner_ids)
+        return [s for s in self._by_id.values() if s.owner_id in ids_set]

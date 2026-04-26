@@ -109,3 +109,13 @@ class SQLAlchemyOwnerSubscriptionRepository:
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_entity(r) for r in rows]
+
+    async def list_by_owner_ids(self, owner_ids):
+        ids_list = [str(i) for i in owner_ids]
+        if not ids_list:
+            return []
+        stmt = select(OwnerSubscriptionModel).where(
+            OwnerSubscriptionModel.owner_id.in_(ids_list),
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(r) for r in rows]

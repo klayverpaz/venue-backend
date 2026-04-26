@@ -95,3 +95,23 @@ async def test_list_all_filters_by_status(db_session):
     rows = await repo.list_all(status="ACTIVE", limit=50, offset=0)
     assert len(rows) == 1
     assert rows[0].status is SubStatus.ACTIVE
+
+
+async def test_list_by_owner_ids(db_session):
+    repo = SQLAlchemyOwnerSubscriptionRepository(db_session)
+    a_id, b_id, c_id = uuid4(), uuid4(), uuid4()
+    sub_a = OwnerSubscription.create_trialing(
+        owner_id=a_id, trial_duration_days=3, now=_now(),
+    ).value
+    sub_b = OwnerSubscription.create_trialing(
+        owner_id=b_id, trial_duration_days=3, now=_now(),
+    ).value
+    await repo.add(sub_a)
+    await repo.add(sub_b)
+    await db_session.flush()
+
+    found = await repo.list_by_owner_ids([a_id, b_id, c_id])
+    assert {s.owner_id for s in found} == {a_id, b_id}
+
+    empty = await repo.list_by_owner_ids([])
+    assert empty == []

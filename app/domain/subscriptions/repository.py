@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -32,4 +33,8 @@ class ISubscriptionRepository(Protocol):
 
     async def list_trialing_with_expiry_before(
         self, threshold: datetime,
+    ) -> list[OwnerSubscription]: ...
+
+    async def list_by_owner_ids(
+        self, owner_ids: Iterable[UUID],
     ) -> list[OwnerSubscription]: ...
