@@ -48,14 +48,19 @@ async def test_create_resource_type_propagates_slug_failure():
 
 async def test_create_resource_type_aggregates_attribute_schema_failures():
     """Handler aggregates per-element AttributeDefinition.create failures and
-    InvalidDataType branches, returning structured FieldError per row."""
+    InvalidDataType branches, returning structured FieldError per row.
+
+    AttributeDefinition.create itself is an aggregator (Plan 04 envelope), so
+    its sub-failures get flattened with prefixed paths
+    (e.g., 'attribute_schema[1].key').
+    """
     repo = InMemoryResourceTypeRepository()
     handler = CreateResourceTypeHandler(repo)
     r = await handler.handle(_cmd(
         attribute_schema=[
             {"key": "ok", "label": "OK", "data_type": "not-a-type",
              "required": False, "enum_values": None},
-            {"key": "BAD KEY", "label": "Bad", "data_type": "string",
+            {"key": "BAD KEY", "label": "", "data_type": "string",
              "required": False, "enum_values": None},
         ],
     ))
@@ -63,12 +68,14 @@ async def test_create_resource_type_aggregates_attribute_schema_failures():
     assert r.status_code == 400
     assert r.error is None
     assert r.details is not None
-    fields = {e.field for e in r.details}
-    assert "attribute_schema[0].data_type" in fields
-    # The second row has an invalid AttributeKey (uppercase + space).
-    assert any(f == "attribute_schema[1]" for f in fields)
     codes = {(e.field, e.code) for e in r.details}
+    # Row 0: invalid data_type → flat prefixed code.
     assert ("attribute_schema[0].data_type", "InvalidDataType") in codes
+    # Row 1: nested aggregator failure → flattened with child field path.
+    assert ("attribute_schema[1].key", "AttributeKeyInvalidFormat") in codes
+    assert ("attribute_schema[1].label", "ShortNameCannotBeEmpty") in codes
+    # No FieldError carries a None code.
+    assert all(e.code for e in r.details)
 
 
 async def test_create_resource_type_rejects_duplicate_slug():

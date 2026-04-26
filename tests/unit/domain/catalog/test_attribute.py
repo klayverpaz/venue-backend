@@ -58,7 +58,10 @@ def test_attribute_definition_enum_requires_values():
         enum_values=None,
     )
     assert r.is_failure
-    assert AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("enum_values", AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES) in codes
 
 
 def test_attribute_definition_enum_rejects_empty_values():
@@ -69,7 +72,10 @@ def test_attribute_definition_enum_rejects_empty_values():
         enum_values=[],
     )
     assert r.is_failure
-    assert AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("enum_values", AttributeDefinition.ENUM_TYPE_REQUIRES_VALUES) in codes
 
 
 def test_attribute_definition_non_enum_rejects_values():
@@ -80,7 +86,10 @@ def test_attribute_definition_non_enum_rejects_values():
         enum_values=["a", "b"],
     )
     assert r.is_failure
-    assert AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("enum_values", AttributeDefinition.NON_ENUM_TYPE_CANNOT_HAVE_VALUES) in codes
 
 
 def test_attribute_definition_propagates_attribute_key_error():
@@ -90,7 +99,10 @@ def test_attribute_definition_propagates_attribute_key_error():
         data_type=AttrType.STRING,
     )
     assert r.is_failure
-    assert AttributeKey.ATTRIBUTE_KEY_INVALID_FORMAT in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("key", AttributeKey.ATTRIBUTE_KEY_INVALID_FORMAT) in codes
 
 
 def test_attribute_definition_propagates_label_error():
@@ -100,7 +112,10 @@ def test_attribute_definition_propagates_label_error():
         data_type=AttrType.STRING,
     )
     assert r.is_failure
-    assert ShortName.SHORT_NAME_CANNOT_BE_EMPTY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("label", ShortName.SHORT_NAME_CANNOT_BE_EMPTY) in codes
 
 
 def test_attribute_definition_propagates_enum_value_error():
@@ -111,7 +126,24 @@ def test_attribute_definition_propagates_enum_value_error():
         enum_values=["valid", ""],
     )
     assert r.is_failure
-    assert ShortName.SHORT_NAME_CANNOT_BE_EMPTY in r.error
+    assert r.error is None
+    assert r.details is not None
+    codes = {(e.field, e.code) for e in r.details}
+    assert ("enum_values[1]", ShortName.SHORT_NAME_CANNOT_BE_EMPTY) in codes
+
+
+def test_attribute_definition_aggregates_multiple_field_failures():
+    r = AttributeDefinition.create(
+        key="Invalid Key!",
+        label="",
+        data_type=AttrType.STRING,
+    )
+    assert r.is_failure
+    assert r.error is None
+    assert r.details is not None
+    fields = {e.field for e in r.details}
+    assert "key" in fields
+    assert "label" in fields
 
 
 def test_attribute_definition_equality():

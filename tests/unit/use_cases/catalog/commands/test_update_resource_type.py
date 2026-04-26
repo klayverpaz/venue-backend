@@ -109,7 +109,7 @@ async def test_update_aggregates_attribute_schema_per_row_failures():
         attribute_schema=[
             {"key": "ok", "label": "OK", "data_type": "not-a-type",
              "required": False, "enum_values": None},
-            {"key": "BAD KEY", "label": "Bad", "data_type": "string",
+            {"key": "BAD KEY", "label": "", "data_type": "string",
              "required": False, "enum_values": None},
         ],
     ))
@@ -117,8 +117,10 @@ async def test_update_aggregates_attribute_schema_per_row_failures():
     assert r.status_code == 400
     assert r.error is None
     assert r.details is not None
-    fields = {e.field for e in r.details}
-    assert "attribute_schema[0].data_type" in fields
-    assert "attribute_schema[1]" in fields
     codes = {(e.field, e.code) for e in r.details}
+    # Row 0: invalid data_type → flat prefixed code.
     assert ("attribute_schema[0].data_type", "InvalidDataType") in codes
+    # Row 1: nested aggregator failure → flattened with child field path.
+    assert ("attribute_schema[1].key", "AttributeKeyInvalidFormat") in codes
+    assert ("attribute_schema[1].label", "ShortNameCannotBeEmpty") in codes
+    assert all(e.code for e in r.details)

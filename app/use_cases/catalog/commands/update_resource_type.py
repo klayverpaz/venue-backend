@@ -57,7 +57,19 @@ class UpdateResourceTypeHandler:
                     enum_values=raw.get("enum_values"),
                 )
                 if r.is_failure:
-                    errors.append(FieldError(code=r.error, field=f"attribute_schema[{idx}]"))
+                    if r.details is not None:
+                        for d in r.details:
+                            prefixed = (
+                                f"attribute_schema[{idx}].{d.field}"
+                                if d.field
+                                else f"attribute_schema[{idx}]"
+                            )
+                            errors.append(FieldError(code=d.code, field=prefixed))
+                    else:
+                        errors.append(FieldError(
+                            code=r.error or "InternalError",
+                            field=f"attribute_schema[{idx}]",
+                        ))
                 else:
                     defs.append(r.value)
             if errors:
