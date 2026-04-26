@@ -109,7 +109,7 @@ All VOs live under `app/domain/shared/value_objects/<vo>.py`. **Every VO follows
 | `Slug` | `str` | max 80, kebab-case `^[a-z][a-z0-9-]*[a-z0-9]$`, no leading/trailing/repeated `-` | `ResourceType.slug`, `Resource.slug` |
 | `Name` | `str` | max 500, min 1 (after strip), no control chars | `User.full_name`, `ResourceType.name`, `Resource.name`, `Resource.city`, `Resource.region` |
 | `ShortName` | `str` | max 40, min 1 | `AttributeDefinition.label`, `CustomAttribute.label`, entries in `AttributeDefinition.enum_values` |
-| `ShortDescription` | `str` | max 500, min 0 (empty allowed) | `ResourceType.description`, `Resource.description`, `Booking.customer_note`, `OwnerSubscription.notes`, `Rating.comment` |
+| `ShortDescription` | `str` | max 500, min 0 (empty allowed) | `ResourceType.description`, `Resource.description`, `Booking.customer_note`, `Rating.comment` |
 | `AttributeKey` | `str` | max 50, snake_case `^[a-z][a-z0-9_]*$` | `AttributeDefinition.key`, `CustomAttribute.key` |
 | `Money` | `int` cents | ≥ 0, ≤ 10¹⁰ (R$ 100M) | `Resource.base_price_cents`, `PricingRule.price_cents`, `Booking.total_price_cents` |
 | `TimeWindow` | `(time, time)` | `start < end`, intra-day (no overnight wrap) | per-day operating hours, `PricingRule.starts_at`/`ends_at` |
@@ -300,15 +300,18 @@ OwnerSubscription
 ├── id: UUID
 ├── owner_id: UUID (unique)
 ├── status: SubStatus (ACTIVE | TRIALING | PAST_DUE | INACTIVE)
-├── status_changed_at: datetime
-├── notes: ShortDescription                 # admin-freeform; empty allowed
+├── status_changed_at: datetime          # tz-aware UTC
+├── trial_ends_at: datetime | None       # tz-aware UTC; required iff status=TRIALING
 └── created_at, updated_at
 ```
 
 **Invariants**
 - One row per owner.
-- Only `SetOwnerSubscriptionStatusHandler` (admin-only) mutates `status`.
-- `is_operational()` returns true when `status ∈ {ACTIVE, TRIALING}`. `RequestBookingHandler` rejects when not operational. Public listings exclude resources whose owner is not operational.
+- Cross-field invariant: `status == TRIALING` ⇔ `trial_ends_at is not None` (enforced in `__post_init__`).
+- Auto-created in `TRIALING` status when a `User` registers with `role=OWNER` (atomic with the user insert, shared `AsyncSession`). `trial_ends_at = now + Settings.trial_duration_days` (default 3 days).
+- Only `SetOwnerSubscriptionStatusHandler` (admin-only) mutates `status`; idempotent on no-op.
+- `ExpireTrialingSubscriptionsHandler` nightly cron flips `TRIALING → INACTIVE` for rows with `trial_ends_at < now`. Stale-state window bounded by cron interval (acceptable per §3 decision 9 — soft subscription, no money at stake).
+- `is_operational()` returns true when `status ∈ {ACTIVE, TRIALING}`. Plan 06 `PublicListResources` composes this with `User.is_active` for the operational gate.
 
 ### 5.6 `notifications` — `Notification`
 
