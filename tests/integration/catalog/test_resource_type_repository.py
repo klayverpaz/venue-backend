@@ -71,7 +71,7 @@ async def test_update_persists_changes(db_session):
     repo = SQLAlchemyResourceTypeRepository(db_session)
     rt = _make_rt()
     await repo.add(rt)
-    rt.update_metadata(name="Campo de Futebol", description="atualizado")
+    assert rt.update_metadata(name="Campo de Futebol", description="atualizado").is_success
     rt.deactivate()
     r = await repo.update(rt)
     assert r.is_success

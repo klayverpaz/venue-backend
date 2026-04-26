@@ -3,7 +3,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from app.infrastructure.db.base import Base
 # Registra todos os modelos em Base.metadata:
-from app.infrastructure.db.mappings import user  # noqa: F401
+from app.infrastructure.db.mappings import resource_type, user  # noqa: F401
 
 
 @pytest_asyncio.fixture
