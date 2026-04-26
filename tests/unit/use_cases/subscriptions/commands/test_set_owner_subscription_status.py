@@ -41,6 +41,7 @@ async def _seed_owner(users: InMemoryUserRepository, *, is_active: bool = True):
         role=Role.OWNER,
         full_name="Owner",
         phone=None,
+        public_slug="owner",
     ).value
     if not is_active:
         user.deactivate()

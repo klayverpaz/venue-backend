@@ -15,6 +15,7 @@ def seed_user():
     r = User.create(
         email="alice@example.com", password_hash=h.hash("pw"),
         role=Role.OWNER, full_name="Alice", phone=None,
+        public_slug="alice",
     )
     return r.value
 

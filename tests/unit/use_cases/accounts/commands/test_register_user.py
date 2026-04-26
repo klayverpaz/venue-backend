@@ -51,6 +51,7 @@ async def test_register_owner_success():
         role=Role.OWNER,
         full_name="Bob",
         phone="+5511999999999",
+        public_slug="bob",
     ))
     assert r.is_success
     assert r.value.role is Role.OWNER
@@ -135,6 +136,7 @@ async def test_register_owner_creates_trialing_subscription():
         role=Role.OWNER,
         full_name="Owner",
         phone=None,
+        public_slug="owner",
     ))
     assert r.is_success
     sub = await subs.get_by_owner_id(r.value.id)
@@ -168,6 +170,7 @@ async def test_register_owner_trial_window_uses_config_value():
         role=Role.OWNER,
         full_name="Owner",
         phone=None,
+        public_slug="window-owner",
     ))
     sub = await subs.get_by_owner_id(r.value.id)
     delta = sub.trial_ends_at - sub.status_changed_at

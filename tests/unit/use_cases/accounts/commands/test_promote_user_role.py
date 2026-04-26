@@ -12,9 +12,11 @@ from tests.unit.use_cases.accounts.fakes.fake_password_hasher import FakePasswor
 
 def seed_user(role=Role.CUSTOMER):
     h = FakePasswordHasher()
+    slug = "alice" if role is Role.OWNER else None
     r = User.create(
         email="alice@example.com", password_hash=h.hash("pw"),
         role=role, full_name="Alice", phone=None,
+        public_slug=slug,
     )
     return r.value
 

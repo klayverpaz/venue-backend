@@ -29,6 +29,7 @@ def test_create_user_no_phone():
         role=Role.OWNER,
         full_name="Bob",
         phone=None,
+        public_slug="bob",
     )
     assert r.is_success
     assert r.value.phone is None
@@ -172,3 +173,57 @@ def test_deactivate_and_reactivate():
     assert u.is_active is False
     u.activate()
     assert u.is_active is True
+
+
+def test_owner_requires_public_slug():
+    r = User.create(
+        email="o@example.com",
+        password_hash="hash",
+        role=Role.OWNER,
+        full_name="Joana Silva",
+        phone=None,
+        public_slug=None,
+    )
+    assert r.is_failure
+    codes = {e.code for e in r.details}
+    assert User.PUBLIC_SLUG_REQUIRED_FOR_OWNER in codes
+
+
+def test_non_owner_forbids_public_slug():
+    r = User.create(
+        email="c@example.com",
+        password_hash="hash",
+        role=Role.CUSTOMER,
+        full_name="Bruno Lima",
+        phone=None,
+        public_slug="bruno-lima",
+    )
+    assert r.is_failure
+    codes = {e.code for e in r.details}
+    assert User.PUBLIC_SLUG_FORBIDDEN_FOR_NON_OWNER in codes
+
+
+def test_owner_accepts_valid_slug():
+    r = User.create(
+        email="o@example.com",
+        password_hash="hash",
+        role=Role.OWNER,
+        full_name="Joana Silva",
+        phone=None,
+        public_slug="joana-silva",
+    )
+    assert r.is_success
+    assert r.value.public_slug.value == "joana-silva"
+
+
+def test_customer_accepts_no_slug():
+    r = User.create(
+        email="c@example.com",
+        password_hash="hash",
+        role=Role.CUSTOMER,
+        full_name="Bruno Lima",
+        phone=None,
+        public_slug=None,
+    )
+    assert r.is_success
+    assert r.value.public_slug is None
