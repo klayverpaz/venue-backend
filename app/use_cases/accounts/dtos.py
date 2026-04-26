@@ -14,6 +14,7 @@ class UserDto:
     full_name: str
     phone: str | None
     is_active: bool
+    public_slug: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -26,6 +27,7 @@ class UserDto:
             full_name=u.full_name.value,
             phone=str(u.phone) if u.phone else None,
             is_active=u.is_active,
+            public_slug=u.public_slug.value if u.public_slug else None,
             created_at=u.created_at,
             updated_at=u.updated_at,
         )

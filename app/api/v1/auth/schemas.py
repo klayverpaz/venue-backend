@@ -38,6 +38,7 @@ class UserResponse(BaseModel):
     full_name: str
     phone: str | None
     is_active: bool
+    public_slug: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -50,6 +51,7 @@ class UserResponse(BaseModel):
             full_name=dto.full_name,
             phone=dto.phone,
             is_active=dto.is_active,
+            public_slug=dto.public_slug,
             created_at=dto.created_at,
             updated_at=dto.updated_at,
         )

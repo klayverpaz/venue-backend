@@ -63,6 +63,9 @@ class ResourceResponse(BaseModel):
 
     @classmethod
     def from_dto(cls, dto: ResourceDto) -> "ResourceResponse":
+        def _tw(w: TimeWindowDto) -> TimeWindowSchema:
+            return TimeWindowSchema(start=w.start, end=w.end)
+
         return cls(
             id=dto.id,
             owner_id=dto.owner_id,
@@ -77,13 +80,13 @@ class ResourceResponse(BaseModel):
             timezone=dto.timezone,
             slot_duration_minutes=dto.slot_duration_minutes,
             operating_hours=WeeklyScheduleSchema(**{
-                "monday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.monday],
-                "tuesday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.tuesday],
-                "wednesday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.wednesday],
-                "thursday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.thursday],
-                "friday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.friday],
-                "saturday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.saturday],
-                "sunday": [TimeWindowSchema(**w.__dict__) for w in dto.operating_hours.sunday],
+                "monday": [_tw(w) for w in dto.operating_hours.monday],
+                "tuesday": [_tw(w) for w in dto.operating_hours.tuesday],
+                "wednesday": [_tw(w) for w in dto.operating_hours.wednesday],
+                "thursday": [_tw(w) for w in dto.operating_hours.thursday],
+                "friday": [_tw(w) for w in dto.operating_hours.friday],
+                "saturday": [_tw(w) for w in dto.operating_hours.saturday],
+                "sunday": [_tw(w) for w in dto.operating_hours.sunday],
             }),
             pricing_rules=[
                 PricingRuleSchema(
@@ -95,7 +98,10 @@ class ResourceResponse(BaseModel):
             base_price_cents=dto.base_price_cents,
             customer_cancellation_cutoff_hours=dto.customer_cancellation_cutoff_hours,
             base_attributes=dto.base_attributes,
-            custom_attributes=[CustomAttributeSchema(**c.__dict__) for c in dto.custom_attributes],
+            custom_attributes=[
+                CustomAttributeSchema(key=c.key, label=c.label, value=c.value)
+                for c in dto.custom_attributes
+            ],
             is_published=dto.is_published,
             deleted_at=dto.deleted_at,
             created_at=dto.created_at,

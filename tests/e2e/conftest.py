@@ -15,6 +15,8 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.infrastructure.db import session as session_mod
 from app.infrastructure.db.base import Base
+from app.infrastructure.db.mappings import owner_subscription  # noqa: F401
+from app.infrastructure.db.mappings import resource  # noqa: F401
 from app.infrastructure.db.mappings import resource_type  # noqa: F401
 from app.infrastructure.db.mappings import user  # noqa: F401
 from app.infrastructure.db.mappings.user import UserModel
@@ -37,6 +39,20 @@ async def client():
     await engine.dispose()
     session_mod._engine = None
     session_mod._sessionmaker = None
+
+
+@pytest_asyncio.fixture
+async def db_session(client):
+    """An AsyncSession that shares the same in-memory engine as ``client``.
+
+    ``client`` must be requested first so that ``session_mod._sessionmaker``
+    is already pointing at the test engine before we open a session here.
+    The fixture depends on ``client`` (not the other way around) so the
+    fixture graph is: client → db_session → test.
+    """
+    assert session_mod._sessionmaker is not None
+    async with session_mod._sessionmaker() as s:
+        yield s
 
 
 @pytest_asyncio.fixture
