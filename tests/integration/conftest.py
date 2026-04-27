@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.infrastructure.db.base import Base
 # Registra todos os modelos em Base.metadata:
 from app.infrastructure.db.mappings import (  # noqa: F401
-    notification, owner_subscription, resource, resource_type, user,
+    booking, notification, owner_subscription, resource, resource_type, user,
 )
 
 
