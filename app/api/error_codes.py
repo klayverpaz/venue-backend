@@ -147,6 +147,9 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "ResourceTypeInactive": "Tipo de recurso está inativo.",
     "TimeWindowInvalidType": "Janela de horário em formato inválido.",
 
+    # Notifications (Plan 07) — handler-level
+    "NotificationNotFound": "Notificação não encontrada.",
+
     # ResourceType (entity-level codes — registered in arch test allowlist)
     "DuplicateAttributeKey": "Atributos duplicados — chaves devem ser únicas dentro do tipo.",
     "RequiredAttributeMissing": "Atributo obrigatório ausente.",
