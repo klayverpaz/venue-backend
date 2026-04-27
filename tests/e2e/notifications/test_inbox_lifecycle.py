@@ -119,3 +119,41 @@ async def test_mark_read_returns_204_when_already_read(
         headers={"Authorization": f"Bearer {owner_token}"},
     )
     assert resp.status_code == 204
+
+
+async def test_cross_recipient_mark_read_returns_404(
+    client, admin_token, customer_token,
+):
+    owner_token, owner_id = await _register_owner(
+        client, email="owner-inbox-3@example.com",
+    )
+
+    # Trigger a notification on the owner.
+    await client.post(
+        f"/v1/admin/owners/{owner_id}/subscription",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"status": "INACTIVE"},
+    )
+    resp = await client.get(
+        "/v1/me/notifications",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    notif_id = resp.json()["items"][0]["id"]
+
+    # Customer tries to mark it read — should be 404 (no leak).
+    resp = await client.post(
+        f"/v1/me/notifications/{notif_id}/read",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 404, resp.text
+    body = resp.json()
+    assert body["detail"]["code"] == "NotificationNotFound"
+
+
+async def test_unknown_id_returns_404(client, customer_token):
+    resp = await client.post(
+        "/v1/me/notifications/00000000-0000-0000-0000-000000000000/read",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "NotificationNotFound"
