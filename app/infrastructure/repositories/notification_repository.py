@@ -105,6 +105,9 @@ class SQLAlchemyNotificationRepository(INotificationRepository):
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         if row is None:
+            # Defensive: reachable only via direct repo use (e.g., the integration
+            # test). MarkNotificationReadHandler always fetches via
+            # get_for_recipient first, so this branch is unreachable from the API.
             return Result.failure("NotificationNotFound", status_code=404)
         kwargs = _to_model_kwargs(notification)
         for k, v in kwargs.items():
