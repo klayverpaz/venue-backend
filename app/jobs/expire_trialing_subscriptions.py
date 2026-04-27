@@ -8,8 +8,11 @@ import logging
 
 from app.core.config import get_settings
 from app.infrastructure.db.session import dispose_engine, get_session, init_engine
-from app.infrastructure.notifications.logging_notification_service import (
-    LoggingNotificationService,
+from app.infrastructure.notifications.persistent_notification_service import (
+    PersistentNotificationService,
+)
+from app.infrastructure.repositories.notification_repository import (
+    SQLAlchemyNotificationRepository,
 )
 from app.infrastructure.repositories.owner_subscription_repository import (
     SQLAlchemyOwnerSubscriptionRepository,
@@ -26,10 +29,12 @@ logger = logging.getLogger(__name__)
 async def main() -> int:
     init_engine()
     settings = get_settings()
-    notifications = LoggingNotificationService(logger)
     try:
         async for session in get_session():
             repo = SQLAlchemyOwnerSubscriptionRepository(session)
+            notifications = PersistentNotificationService(
+                SQLAlchemyNotificationRepository(session),
+            )
             handler = ExpireTrialingSubscriptionsHandler(repo, notifications, settings)
             result = await handler.handle(ExpireTrialingSubscriptionsCommand())
             count = result.value or 0

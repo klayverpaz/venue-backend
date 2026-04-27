@@ -1,13 +1,15 @@
 from __future__ import annotations
 from typing import Annotated
-import logging
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.infrastructure.db.session import get_session
-from app.infrastructure.notifications.logging_notification_service import (
-    LoggingNotificationService,
+from app.infrastructure.notifications.persistent_notification_service import (
+    PersistentNotificationService,
+)
+from app.infrastructure.repositories.notification_repository import (
+    SQLAlchemyNotificationRepository,
 )
 from app.infrastructure.repositories.owner_subscription_repository import (
     SQLAlchemyOwnerSubscriptionRepository,
@@ -19,9 +21,6 @@ from app.use_cases.subscriptions.commands.set_owner_subscription_status import (
 from app.use_cases.subscriptions.queries.list_subscriptions import (
     ListSubscriptionsHandler,
 )
-
-
-_logger = logging.getLogger("subscriptions.notifications")
 
 
 async def get_subscription_repo(
@@ -36,8 +35,12 @@ async def get_user_repo(
     return UserRepository(session)
 
 
-async def get_notification_service() -> LoggingNotificationService:
-    return LoggingNotificationService(_logger)
+async def get_notification_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PersistentNotificationService:
+    return PersistentNotificationService(
+        SQLAlchemyNotificationRepository(session),
+    )
 
 
 async def get_settings_dep() -> Settings:
@@ -47,7 +50,7 @@ async def get_settings_dep() -> Settings:
 async def get_set_status_handler(
     users: Annotated[UserRepository, Depends(get_user_repo)],
     subs: Annotated[SQLAlchemyOwnerSubscriptionRepository, Depends(get_subscription_repo)],
-    notifs: Annotated[LoggingNotificationService, Depends(get_notification_service)],
+    notifs: Annotated[PersistentNotificationService, Depends(get_notification_service)],
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> SetOwnerSubscriptionStatusHandler:
     return SetOwnerSubscriptionStatusHandler(users, subs, notifs, settings)
