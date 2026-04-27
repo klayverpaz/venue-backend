@@ -1128,6 +1128,8 @@ EOF
 - Modify: `app/domain/resources/resource.py`
 - Create: `tests/unit/domain/resources/test_resource_compute_price.py`
 
+> **Execution note (2026-04-27):** During execution it was discovered that `Resource.compute_price` had already shipped in Plan 06 with a private `_PYTHON_WD_TO_VO` dict that duplicates the `Weekday.from_iso` helper added in Task 1. Task 6 was therefore reduced to (a) committing the unit tests for `compute_price` and (b) refactoring `compute_price` to use `Weekday.from_iso(local.isoweekday())`, removing the now-redundant dict.
+
 - [ ] **Step 1: Write failing tests**
 
 Create `tests/unit/domain/resources/test_resource_compute_price.py`:

@@ -415,7 +415,7 @@ class Resource(BaseEntity):
         cursor = slot_range.start_at
         while cursor < slot_range.end_at:
             local = cursor.astimezone(tz)
-            wd_local = _PYTHON_WD_TO_VO[local.weekday()]
+            wd_local = Weekday.from_iso(local.isoweekday())
             tod = local.time()
 
             matched: PricingRule | None = None
@@ -430,15 +430,3 @@ class Resource(BaseEntity):
             cursor += delta
 
         return Money.create(total).value
-
-
-# Map Python's datetime.weekday() (Mon=0..Sun=6) to our Weekday VO.
-_PYTHON_WD_TO_VO = {
-    0: Weekday.MONDAY,
-    1: Weekday.TUESDAY,
-    2: Weekday.WEDNESDAY,
-    3: Weekday.THURSDAY,
-    4: Weekday.FRIDAY,
-    5: Weekday.SATURDAY,
-    6: Weekday.SUNDAY,
-}
