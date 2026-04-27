@@ -988,10 +988,13 @@ from app.domain.shared.value_objects.date_time_range import DateTimeRange
 
 
 class IBookingRepository(Protocol):
+    """Persistence port for the bookings feature."""
+
     async def add(self, booking: Booking) -> Result[None]: ...
 
-    async def get_by_id(self, booking_id: UUID) -> Result[Booking | None]: ...
-    """Returns the booking regardless of customer/owner. Handlers apply scoping."""
+    async def get_by_id(self, booking_id: UUID) -> Result[Booking | None]:
+        """Returns the booking regardless of customer/owner. Handlers apply scoping."""
+        ...
 
     async def list_by_customer(
         self,
@@ -1007,9 +1010,10 @@ class IBookingRepository(Protocol):
         customer_id: UUID,
         resource_id: UUID,
         slot_range: DateTimeRange,
-    ) -> Result[list[Booking]]: ...
-    """Natural dedup: returns this customer's PENDING/APPROVED bookings on
-    this resource that overlap the slot_range."""
+    ) -> Result[list[Booking]]:
+        """Natural dedup: returns this customer's PENDING/APPROVED bookings on
+        this resource that overlap the slot_range."""
+        ...
 
     async def list_pending_overlapping(
         self,
@@ -1017,8 +1021,9 @@ class IBookingRepository(Protocol):
         slot_range: DateTimeRange,
         *,
         exclude_booking_id: UUID | None = None,
-    ) -> Result[list[Booking]]: ...
-    """Used by ApproveBookingHandler to find competitors."""
+    ) -> Result[list[Booking]]:
+        """Used by ApproveBookingHandler to find competitors."""
+        ...
 
     async def list_by_resource(
         self,
@@ -1034,25 +1039,29 @@ class IBookingRepository(Protocol):
         resource_id: UUID,
         range_start: datetime,
         range_end: datetime,
-    ) -> Result[list[Booking]]: ...
-    """Used by GetAgendaHandler — returns all bookings (any status) whose
-    slot_range intersects [range_start, range_end]."""
+    ) -> Result[list[Booking]]:
+        """Used by GetAgendaHandler — returns all bookings (any status) whose
+        slot_range intersects [range_start, range_end]."""
+        ...
 
     async def list_pending_with_start_before(
         self, cutoff: datetime,
-    ) -> Result[list[Booking]]: ...
-    """Used by ExpirePendingBookingsHandler cron."""
+    ) -> Result[list[Booking]]:
+        """Used by ExpirePendingBookingsHandler cron."""
+        ...
 
     async def list_pending_for_resource(
         self, resource_id: UUID,
-    ) -> Result[list[Booking]]: ...
-    """Used by SoftDeleteResourceHandler cascade."""
+    ) -> Result[list[Booking]]:
+        """Used by SoftDeleteResourceHandler cascade."""
+        ...
 
     async def list_approved_with_start_after(
         self, resource_id: UUID, cutoff: datetime,
-    ) -> Result[list[Booking]]: ...
-    """Used by SoftDeleteResourceHandler to detect future approved bookings
-    that should block deletion."""
+    ) -> Result[list[Booking]]:
+        """Used by SoftDeleteResourceHandler to detect future approved bookings
+        that should block deletion."""
+        ...
 
     async def update(self, booking: Booking) -> Result[None]: ...
 ```
