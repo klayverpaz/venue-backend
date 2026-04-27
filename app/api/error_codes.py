@@ -179,6 +179,11 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
         "Timestamp de mudança de status precisa ter fuso horário.",
     OwnerSubscription.TRIAL_ENDS_AT_MUST_BE_TZ_AWARE:
         "Data de fim de trial precisa ter fuso horário.",
+
+    # StatusChange (Plan 08) — bookings audit VO
+    "StatusChangeAtNotTzAware": "Timestamp da mudança de status precisa ter fuso horário.",
+    "StatusChangeReasonTooLong": "Motivo da mudança de status não pode ultrapassar 500 caracteres.",
+    "StatusChangeInvalidTransition": "Transição de status inválida.",
 }
 
 
