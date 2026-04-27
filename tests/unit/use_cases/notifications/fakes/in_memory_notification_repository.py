@@ -42,7 +42,13 @@ class InMemoryNotificationRepository(INotificationRepository):
         if unread_only:
             ordered = [n for n in ordered if n.read_at is None]
         if cursor is not None:
-            cursor_row = next((n for n in self._rows if n.id == cursor), None)
+            cursor_row = next(
+                (
+                    n for n in self._rows
+                    if n.id == cursor and n.recipient_id == recipient_id
+                ),
+                None,
+            )
             if cursor_row is not None:
                 ordered = [
                     n for n in ordered

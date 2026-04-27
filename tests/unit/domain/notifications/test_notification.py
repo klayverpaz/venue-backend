@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from app.domain.notifications.notification import Notification
 from app.domain.notifications.service import NotifKind
+
+
+def _now() -> datetime:
+    return datetime(2026, 4, 26, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_notif_kind_subscription_changed():
@@ -25,16 +33,6 @@ def test_notif_kind_booking_cancelled():
 
 def test_notif_kind_has_no_booking_rated():
     assert not hasattr(NotifKind, "BOOKING_RATED")
-
-
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-
-from app.domain.notifications.notification import Notification
-
-
-def _now() -> datetime:
-    return datetime(2026, 4, 26, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_notification_create_sets_all_fields():
