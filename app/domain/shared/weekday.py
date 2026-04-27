@@ -17,3 +17,24 @@ class Weekday(str, Enum):
     FRIDAY = "FRIDAY"
     SATURDAY = "SATURDAY"
     SUNDAY = "SUNDAY"
+
+    @classmethod
+    def from_iso(cls, iso_weekday: int) -> "Weekday":
+        """Maps Python's datetime.isoweekday() (1=Monday … 7=Sunday) to Weekday."""
+        try:
+            return _ISO_TO_WEEKDAY[iso_weekday]
+        except KeyError as exc:
+            raise ValueError(
+                f"iso_weekday must be in [1, 7]; got {iso_weekday}",
+            ) from exc
+
+
+_ISO_TO_WEEKDAY: dict[int, Weekday] = {
+    1: Weekday.MONDAY,
+    2: Weekday.TUESDAY,
+    3: Weekday.WEDNESDAY,
+    4: Weekday.THURSDAY,
+    5: Weekday.FRIDAY,
+    6: Weekday.SATURDAY,
+    7: Weekday.SUNDAY,
+}
