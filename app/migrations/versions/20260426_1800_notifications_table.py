@@ -28,11 +28,9 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index('ix_notifications_recipient_id', 'notifications', ['recipient_id'], unique=False)
     op.create_index('idx_notifications_recipient_created', 'notifications', ['recipient_id', 'created_at', 'id'], unique=False)
 
 
 def downgrade() -> None:
     op.drop_index('idx_notifications_recipient_created', table_name='notifications')
-    op.drop_index('ix_notifications_recipient_id', table_name='notifications')
     op.drop_table('notifications')

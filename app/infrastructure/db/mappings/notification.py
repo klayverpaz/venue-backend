@@ -21,7 +21,7 @@ class NotificationModel(Base, TimestampMixin):
     )
 
     id: Mapped[UUID] = mapped_column(CHAR(36), primary_key=True)
-    recipient_id: Mapped[UUID] = mapped_column(CHAR(36), nullable=False, index=True)
+    recipient_id: Mapped[UUID] = mapped_column(CHAR(36), nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
