@@ -32,6 +32,7 @@ from app.domain.resources.pricing_rule import PricingRule
 from app.domain.resources.resource import Resource
 from app.domain.resources.weekly_schedule import WeeklySchedule
 from app.domain.shared.value_objects.time_window import TimeWindow
+from app.domain.bookings.status_change import StatusChange
 
 
 ERROR_MESSAGES_PT_BR: dict[str, str] = {
@@ -181,9 +182,9 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
         "Data de fim de trial precisa ter fuso horário.",
 
     # StatusChange (Plan 08) — bookings audit VO
-    "StatusChangeAtNotTzAware": "Timestamp da mudança de status precisa ter fuso horário.",
-    "StatusChangeReasonTooLong": "Motivo da mudança de status não pode ultrapassar 500 caracteres.",
-    "StatusChangeInvalidTransition": "Transição de status inválida.",
+    StatusChange.STATUS_CHANGE_AT_NOT_TZ_AWARE: "Timestamp da mudança de status precisa ter fuso horário.",
+    StatusChange.STATUS_CHANGE_REASON_TOO_LONG: "Motivo da mudança de status não pode ultrapassar 500 caracteres.",
+    StatusChange.STATUS_CHANGE_INVALID_TRANSITION: "Transição de status inválida.",
 }
 
 
