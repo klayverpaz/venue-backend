@@ -39,7 +39,7 @@ A user has exactly one role. Roles are immutable except by an explicit admin han
 | 10 | Pricing model: day-of-week × time-of-day rules per resource; gaps fall back to a `base_price_cents` on the resource. | Owners with peak/off-peak prices are the norm; fallback prevents validation deadlocks for new owners. |
 | 11 | Discovery: each owner and each resource gets a public URL (slug-based). Plus a platform-wide listing filterable by resource type and city/region. No map, no geosearch. Ratings are aggregated from completed bookings. | Fits the realistic acquisition model (owners drive traffic via social) without skipping browse-ability. |
 | 12 | Cancellations: owner can cancel anytime; customer can cancel until `customer_cancellation_cutoff_hours` before slot start. Audit trail on the booking. | Encodes the natural asymmetry; no monetary penalties (money is off-platform). |
-| 13 | Notifications: in-app inbox for every event + transactional email via a port (`IEmailSender`). Logging adapter for MVP; real provider later. | In-app alone gets missed; email is essentially free; port keeps WhatsApp/SMS a swap-in. |
+| 13 | Notifications: in-app inbox for every event. **Email deferred** (MVP scope cut, see plan-07-notifications-design.md §1; port reintroducible later). | In-app coverage is enough for the MVP feedback loop; email/SMS stays a future plan. |
 | 14 | Idempotency keys accepted on `POST /me/bookings` and approval/reject endpoints. | Cheap to add; avoids the inevitable double-click / network-retry duplicate booking. |
 | 15 | Localization: identifiers and code in English; user-facing strings in pt-BR. **VO and handler errors are stable code identifiers** (e.g., `"NameCannotBeEmpty"`); the HTTP boundary in `app/api/error_handler.py` maps codes → pt-BR. | Stable contract for tests + i18n, decoupled from display language. |
 | 16 | **Money is represented as `int` cents (smallest currency unit), wrapped in a `Money` VO.** Float is forbidden for monetary values. | Floats can't represent decimals exactly (`0.1 + 0.2 ≠ 0.3`); industry standard for marketplaces (Stripe, Mercado Pago, Adyen) is integer minor units. |
@@ -67,7 +67,7 @@ api ──▶ use_cases ──▶ domain ◀── infrastructure
 | `resources` | `Resource` | `WeeklySchedule`, `PricingRule`, `CustomAttribute` |
 | `bookings` | `Booking` | `SlotRange`, `StatusChange` |
 | `subscriptions` | `OwnerSubscription` | `SubStatus` |
-| `notifications` | `Notification` | `IEmailSender` port |
+| `notifications` | `Notification` | `INotificationService`, `INotificationRepository` ports |
 | `ratings` | `Rating` | (none — leaf aggregate) |
 
 ### 4.2 Cross-feature rules
@@ -83,7 +83,7 @@ Cross-feature handlers expected:
 | `CancelBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Branch by actor role; enforce customer cutoff; notify counterpart. |
 | `PromoteUserRoleHandler` | `accounts/commands` | `IUserRepository` | Admin-only; the only role-mutation entrypoint. |
 | `SetOwnerSubscriptionStatusHandler` | `subscriptions/commands` | `ISubscriptionRepository`, `IUserRepository` | Admin-only; verifies target user is `OWNER`. |
-| `CreateRatingHandler` | `ratings/commands` | `IRatingRepository`, `IBookingRepository`, `INotificationService` | Verifies booking is APPROVED + ended + within 90d window + customer matches; persists rating; notifies owner. |
+| `CreateRatingHandler` | `ratings/commands` | `IRatingRepository`, `IBookingRepository` | Verifies booking is APPROVED + ended + within 90d window + customer matches; persists rating. (Plan 07 dropped the owner notification — `BOOKING_RATED` is out of scope; rating signal flows through `Resource.rating_avg` aggregates added by Plan 09.) |
 | `UpdateRatingHandler` | `ratings/commands` | `IRatingRepository` | Customer-only; enforces 7d edit window. |
 | `HideRatingHandler` | `ratings/commands` | `IRatingRepository` | Admin-only; soft-hide + reason. |
 
@@ -322,23 +322,34 @@ Notification
 ├── kind: NotifKind
 ├── payload: dict                           # JSON, kind-specific shape
 ├── read_at: datetime | None
-└── created_at
+└── created_at, updated_at
 
 NotifKind
+├── SUBSCRIPTION_CHANGED
 ├── BOOKING_REQUESTED
 ├── BOOKING_APPROVED
 ├── BOOKING_REJECTED
-├── BOOKING_CANCELLED
-├── BOOKING_RATED                           # NEW — rating created on owner's resource
-└── SUBSCRIPTION_CHANGED
+└── BOOKING_CANCELLED
 
-IEmailSender (Protocol, in domain/notifications/)
-└── send(to: Email, kind: NotifKind, payload: dict) -> Result[None]
+INotificationService (Protocol, in domain/notifications/service.py)
+└── notify(*, recipient_id, kind, payload) -> None        # fire-and-forget
+
+INotificationRepository (Protocol, in domain/notifications/repository.py)
+├── add(notification) -> Result[None]
+├── get_for_recipient(notification_id, recipient_id) -> Result[Notification | None]
+├── list_by_recipient(recipient_id, *, limit, cursor, unread_only) -> Result[list[Notification]]
+└── update(notification) -> Result[None]
 ```
 
 **Invariants**
-- Every notification persists an in-app row regardless of email delivery outcome.
-- Email send failures are logged but do not fail the originating use case.
+- Every `notify(...)` call persists exactly one `Notification` row.
+- Persistence failures inside `PersistentNotificationService` are logged and swallowed — emitting handlers never fail because of notification trouble.
+- `mark_read(now)` is idempotent: calling on an already-read notification is a no-op.
+- `get_for_recipient(...)` returns `None` for cross-recipient lookups so the API responds 404 (`NotificationNotFound`), never 403.
+
+**Plan 07 deliberate cuts (see `docs/superpowers/specs/2026-04-26-plan-07-notifications-design.md`):**
+- `BOOKING_RATED` removed — owner has no actionable response to a rating; Plan 09 adds `rating_avg`/`rating_count` aggregates on `Resource` GETs instead.
+- `IEmailSender` port deferred — MVP ships in-app inbox only. The port can be reintroduced in a future plan without touching the inbox surface.
 
 ### 5.7 `ratings` — `Rating`
 
@@ -528,7 +539,7 @@ The plan order below is the contract for `docs/superpowers/plans/`.
 4. **Plan 04 — Catalog.** `ResourceType` aggregate using `Slug`/`Name`/`ShortDescription`/`AttributeKey`/`ShortName`. Admin CRUD + public listing.
 5. **Plan 05 — Subscriptions.** `OwnerSubscription` aggregate; admin-only mutation; `is_operational()` gating.
 6. **Plan 06 — Resources.** `Resource` aggregate using `Slug`/`Name`/`ShortDescription`/`Money`/`TimeWindow`/`IanaTimezone`/`SlotDuration`/`CancellationCutoff`. Owner CRUD + public read.
-7. **Plan 07 — Notifications.** `Notification` aggregate + `IEmailSender` port + logging adapter. Includes `BOOKING_RATED` enum value.
+7. **Plan 07 — Notifications.** `Notification` aggregate (persistent in-app inbox) + `INotificationRepository` + `PersistentNotificationService` adapter. `NotifKind` grows to 5 values: `SUBSCRIPTION_CHANGED` (existing) plus `BOOKING_REQUESTED` / `BOOKING_APPROVED` / `BOOKING_REJECTED` / `BOOKING_CANCELLED` (Plan 08 emits). `GET /v1/me/notifications` (cursor paged) + `POST /v1/me/notifications/{id}/read`. Email and `BOOKING_RATED` deferred — see plan-07 design doc §1.
 8. **Plan 08 — Bookings.** `Booking` aggregate using `DateTimeRange`/`Money`/`ShortDescription`. Approval transaction with advisory lock + exclusion constraint. Nightly expiry job.
 9. **Plan 09 — Ratings.** `Rating` aggregate. Customer create/edit endpoints. Public list with comment. Admin moderation. `Resource` GETs gain `rating_avg` + `rating_count` aggregates.
 10. **Plan 10 — Seed + production wiring.** Bootstrap admin account (env-driven), seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
