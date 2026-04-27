@@ -556,7 +556,7 @@ Already-read is a no-op success (idempotent). Cross-recipient lookup returns 404
 ### 7.3 Routes file structure
 
 `app/api/v1/me_notifications/`:
-- `__init__.py` — exports `me_notifications_router`.
+- `__init__.py` — empty package marker. By project convention the router is imported directly from `routes` in `app/api/v1/router.py` (matches `me_resources`, `me_subscription`, etc.).
 - `routes.py` — FastAPI router with both endpoints.
 - `deps.py` — DI providers for `ListMyNotificationsHandler` and `MarkNotificationReadHandler`. Repository is built from the request-scoped `AsyncSession`.
 - `schemas.py` — Pydantic request/response models, matching the `me_subscription` / `me_resources` / `admin_subscriptions` layout (single file for both, not split into `request.py` / `response.py`). Includes `NotificationResponse.from_dto(...)` and `NotificationListResponse.from_dto(...)`.
