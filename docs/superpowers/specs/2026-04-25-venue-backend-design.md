@@ -46,7 +46,6 @@ A user has exactly one role. Roles are immutable except by an explicit admin han
 | 17 | **Domain entities NEVER hold raw primitives where a VO exists.** `User.full_name: Name`, not `str`; `Booking.slot_range: DateTimeRange`, not two datetimes; etc. DB columns for VO-backed strings are `TEXT` (no `VARCHAR(N)`) — the VO is the single source of truth for length. | Centralizes validation and prevents "this `name` got past validation because it took a different path" bugs. |
 | 18 | **Ratings are per-booking** (1 rating per completed `APPROVED` booking), not per (customer × resource). Resource exposes `rating_avg` and `rating_count` derived on-the-fly via SQL aggregation; **no denormalized cache** in MVP. | Reflects discrete experiences (rainy Saturday vs sunny Saturday); eligibility check is trivial (`booking.status = APPROVED AND end_at < now`); on-the-fly aggregation with index on `resource_id` is microseconds at MVP scale. |
 | 19 | Rating creation window: 90 days after `slot_range.end_at`. Rating edit window: 7 days after `created_at`. | Anti-retaliation / anti-spam on ancient bookings; short edit window matches Booking.com pattern. |
-| 20 | Admin can soft-hide a rating (`is_hidden = True`); never deletes. Hidden ratings excluded from average/count/public listings. | Audit trail preserved; no information loss. |
 
 ## 4. Architecture
 
@@ -86,7 +85,6 @@ Cross-feature handlers expected:
 | `SetOwnerSubscriptionStatusHandler` | `subscriptions/commands` | `ISubscriptionRepository`, `IUserRepository` | Admin-only; verifies target user is `OWNER`. |
 | `CreateRatingHandler` | `ratings/commands` | `IRatingRepository`, `IBookingRepository` | Verifies booking is APPROVED + ended + within 90d window + customer matches; persists rating. (Plan 07 dropped the owner notification — `BOOKING_RATED` is out of scope; rating signal flows through `Resource.rating_avg` aggregates added by Plan 09.) |
 | `UpdateRatingHandler` | `ratings/commands` | `IRatingRepository` | Customer-only; enforces 7d edit window. |
-| `HideRatingHandler` | `ratings/commands` | `IRatingRepository` | Admin-only; soft-hide + reason. |
 
 ### 4.3 Shared Value Objects
 
@@ -368,8 +366,6 @@ Rating
 ├── customer_id: UUID                       # denormalized for "my ratings"
 ├── score: RatingScore                      # int 1..5
 ├── comment: ShortDescription | None        # optional
-├── is_hidden: bool                         # admin moderation; default False
-├── hidden_reason: str | None               # ≤ 500 chars; admin freeform on hide
 └── created_at, updated_at
 ```
 
@@ -377,8 +373,7 @@ Rating
 - `booking_id` UNIQUE (DB index) — a booking yields at most one rating.
 - The booking referenced must satisfy: `status == APPROVED`, `slot_range.end_at < now`, `customer_id == rating.customer_id`. Verified in `CreateRatingHandler`.
 - **Creation window:** `now ≤ booking.slot_range.end_at + 90 days`. After that, creation is rejected.
-- **Edit window:** `now ≤ rating.created_at + 7 days`. After that, only `is_hidden` mutates (admin-only).
-- `is_hidden = True` removes the row from public average, count, and listings.
+- **Edit window:** `now ≤ rating.created_at + 7 days`. After that, update is rejected.
 
 **Read-side derivation (resource aggregation)**
 
@@ -389,10 +384,15 @@ SELECT
   AVG(score)::numeric(3, 1) AS rating_avg,    -- one decimal, NULL if no rows
   COUNT(*)                  AS rating_count
 FROM ratings
-WHERE resource_id = $1 AND is_hidden = FALSE
+WHERE resource_id = $1
 ```
 
 Owner-scoped resource list adds the same agg. Public owner page (`GET /owners/{slug}`) computes a count-weighted average across all of the owner's published resources.
+
+**Plan 09 deliberate cuts (see `docs/superpowers/specs/2026-04-28-plan-09-ratings-design.md`):**
+- Admin moderation removed from MVP — `is_hidden`, `hidden_reason`, `HideRatingHandler`, and the three `/admin/ratings` endpoints are deferred. Reintroducible as one-column Alembic + filter clause + admin endpoint pair.
+- Rating survives owner-side post-rating cancellation — owner-cancelling an APPROVED booking after the customer has rated leaves the rating intact (audit-honest, no cascade).
+- Owner per-resource ratings list (`GET /me/resources/{id}/ratings`) dropped from MVP — owners see the rolled-up `rating_avg`/`rating_count` on resource listings, no per-rating drill-down.
 
 ## 6. Booking lifecycle and concurrency
 
@@ -453,7 +453,7 @@ All endpoints under `/api/v1/`. JWT auth via the same mechanism as the template'
 GET  /resources                              # filters: type=<slug>&city=&region=&page=&page_size=
 GET  /resources/{slug}                       # public resource page (incl. rating_avg + rating_count)
 GET  /resources/{owner_slug}/{resource_slug}/agenda?from=&to=   # slot grid: AVAILABLE | PENDING | APPROVED + price
-GET  /resources/{slug}/ratings               # only ratings with comment, not hidden, paginated
+GET  /owners/{owner_slug}/resources/{resource_slug}/ratings   # only ratings with comment, paginated
 GET  /owners/{slug}                          # public owner page (their published resources + rating agg)
 GET  /catalog/resource-types                 # for filter UI
 ```
@@ -503,9 +503,6 @@ POST   /me/bookings/{booking_id}/approve     # state-machine idempotency (see §
 POST   /me/bookings/{booking_id}/reject      # body: { reason? }
 POST   /me/bookings/{booking_id}/cancel
 
-# Ratings on my resources (read-only)
-GET    /me/resources/{id}/ratings            # all ratings (hidden + not), paginated
-
 # Read-only
 GET    /me/subscription
 GET    /me/notifications
@@ -530,10 +527,6 @@ POST   /admin/users/{id}/deactivate
 GET    /admin/subscriptions
 POST   /admin/owners/{owner_id}/subscription
 
-# Ratings (moderation)
-GET    /admin/ratings?hidden=&resource_id=
-POST   /admin/ratings/{id}/hide              # body: { reason? }
-POST   /admin/ratings/{id}/unhide
 ```
 
 ## 8. Bootstrap procedure
@@ -548,7 +541,7 @@ The plan order below is the contract for `docs/superpowers/plans/`.
 6. **Plan 06 — Resources.** `Resource` aggregate using `Slug`/`Name`/`ShortDescription`/`Money`/`TimeWindow`/`IanaTimezone`/`SlotDuration`/`CancellationCutoff`. Owner CRUD + public read.
 7. **Plan 07 — Notifications.** `Notification` aggregate (persistent in-app inbox) + `INotificationRepository` + `PersistentNotificationService` adapter. `NotifKind` grows to 5 values: `SUBSCRIPTION_CHANGED` (existing) plus `BOOKING_REQUESTED` / `BOOKING_APPROVED` / `BOOKING_REJECTED` / `BOOKING_CANCELLED` (Plan 08 emits). `GET /v1/me/notifications` (cursor paged) + `POST /v1/me/notifications/{id}/read`. Email and `BOOKING_RATED` deferred — see plan-07 design doc §1.
 8. **Plan 08 — Bookings.** `Booking` aggregate (5-state machine PENDING → {APPROVED, REJECTED, CANCELLED, EXPIRED}; APPROVED → CANCELLED) + `IBookingRepository` + `IBookingLockService` (Postgres advisory_xact_lock + in-memory async-lock test adapter). 5 mutation handlers (request/approve-with-auto-rejection/reject/cancel/expire-cron); 4 query handlers (list-my, get-my, list-resource, agenda — shared public + owner shape). 10 endpoints (4 customer + 5 owner + 1 public agenda). Concurrency: Postgres `btree_gist` exclusion constraint as belt-and-suspenders. Plan 06 retroactives: `Resource.compute_price`, `Weekday.from_iso`, `SoftDeleteResourceHandler` cascade. Natural dedup replaces `Idempotency-Key` — see plan-08 design §1.
-9. **Plan 09 — Ratings.** `Rating` aggregate. Customer create/edit endpoints. Public list with comment. Admin moderation. `Resource` GETs gain `rating_avg` + `rating_count` aggregates.
+9. **Plan 09 — Ratings.** `Rating` aggregate (per-booking, score 1-5 via `RatingScore` VO, optional `ShortDescription` comment, no moderation in MVP) + `IRatingRepository` (7 methods including batch `get_aggregates_for_resources`). 4 handlers: `CreateRatingHandler` (eligibility gate: APPROVED booking, slot ended, customer match, ≤90d window), `UpdateRatingHandler` (7d edit window), `ListMyRatingsHandler`, `ListPublicRatingsForResourceHandler` (comment-only filter). `Resource` GETs gain `rating_avg`/`rating_count` aggregates merged via a single batch query per page (no N+1). Owner page (`GET /owners/{slug}`) computes a count-weighted average. 4 new endpoints (3 customer + 1 public). Concurrency: DB UNIQUE on `booking_id` is the sole race protection. No moderation surface — see plan-09 design §1.
 10. **Plan 10 — Seed + production wiring.** Bootstrap admin account (env-driven), seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
 
 ## 9. Testing strategy
