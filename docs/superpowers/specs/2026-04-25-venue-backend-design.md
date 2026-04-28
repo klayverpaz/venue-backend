@@ -452,7 +452,7 @@ All endpoints under `/api/v1/`. JWT auth via the same mechanism as the template'
 ```
 GET  /resources                              # filters: type=<slug>&city=&region=&page=&page_size=
 GET  /resources/{slug}                       # public resource page (incl. rating_avg + rating_count)
-GET  /resources/{slug}/agenda?from=&to=      # slot grid: AVAILABLE | PENDING | APPROVED + price
+GET  /resources/{owner_slug}/{resource_slug}/agenda?from=&to=   # slot grid: AVAILABLE | PENDING | APPROVED + price
 GET  /resources/{slug}/ratings               # only ratings with comment, not hidden, paginated
 GET  /owners/{slug}                          # public owner page (their published resources + rating agg)
 GET  /catalog/resource-types                 # for filter UI
