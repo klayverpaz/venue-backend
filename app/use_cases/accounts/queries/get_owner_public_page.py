@@ -80,9 +80,10 @@ class GetOwnerPublicPageHandler:
         if total_count == 0:
             owner_avg: Decimal | None = None
         else:
+            # RatingAggregate invariant: avg_score is None ⟺ count == 0 (filter on count).
             weighted_sum = sum(
-                (a.avg_score * a.count if a.avg_score is not None else Decimal(0))
-                for a in aggs.values()
+                a.avg_score * a.count
+                for a in aggs.values() if a.count > 0
             )
             owner_avg = (weighted_sum / Decimal(total_count)).quantize(Decimal("0.1"))
 

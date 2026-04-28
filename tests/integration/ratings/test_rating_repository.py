@@ -116,18 +116,84 @@ async def test_unique_booking_id_rejected(db_session):
 
 
 async def test_list_with_comment_excludes_null_comments(db_session):
-    booking_id, resource_id, customer_id = await _seed_booking_for_rating(db_session)
-    repo = SQLAlchemyRatingRepository(db_session)
-    no_comment = Rating.create(
-        booking_id=booking_id, resource_id=resource_id, customer_id=customer_id,
-        score=_score(5), comment=None, now=_now(),
+    """Insert one with-comment rating and one null-comment rating on the
+    same resource; verify the listing returns only the with-comment one."""
+    # Seed two bookings on the same resource (so two ratings are FK-valid).
+    rt = ResourceTypeModel(
+        id=str(uuid4()), slug="rt", name="RT",
+        description="", attribute_schema=[], is_active=True,
+        created_at=_now(), updated_at=_now(),
     )
-    await repo.add(no_comment)
+    owner = UserModel(
+        id=str(uuid4()), email="o3@example.com", full_name="Owner3",
+        password_hash="x", role="owner", is_active=True,
+        public_slug="owner3", phone_number=None,
+        created_at=_now(), updated_at=_now(),
+    )
+    customer_a = UserModel(
+        id=str(uuid4()), email="ca@example.com", full_name="Customer A",
+        password_hash="x", role="customer", is_active=True,
+        public_slug=None, phone_number=None,
+        created_at=_now(), updated_at=_now(),
+    )
+    customer_b = UserModel(
+        id=str(uuid4()), email="cb@example.com", full_name="Customer B",
+        password_hash="x", role="customer", is_active=True,
+        public_slug=None, phone_number=None,
+        created_at=_now(), updated_at=_now(),
+    )
+    res = ResourceModel(
+        id=str(uuid4()), owner_id=owner.id, resource_type_id=rt.id,
+        slug="r", name="R", description="",
+        city="SP", region="SP", timezone="America/Sao_Paulo",
+        slot_duration_minutes=60, base_price_cents=8000,
+        customer_cancellation_cutoff_hours=24,
+        operating_hours={"monday": [{"start": "06:00", "end": "22:00"}]},
+        pricing_rules=[], custom_attributes=[], base_attributes={},
+        is_published=True, deleted_at=None,
+        created_at=_now(), updated_at=_now(),
+    )
+    bookings = []
+    for cust in (customer_a, customer_b):
+        b = BookingModel(
+            id=str(uuid4()), resource_id=res.id, customer_id=cust.id,
+            slot_start_at=_now() - timedelta(days=1, hours=1),
+            slot_end_at=_now() - timedelta(days=1),
+            status="APPROVED",
+            customer_note=None, total_price_cents=8000,
+            status_history=[],
+            created_at=_now() - timedelta(days=2),
+            updated_at=_now() - timedelta(days=2),
+        )
+        bookings.append(b)
+    db_session.add_all([rt, owner, customer_a, customer_b, res, *bookings])
+    await db_session.flush()
+
+    repo = SQLAlchemyRatingRepository(db_session)
+    note = ShortDescription.create("foi bom").value
+    with_comment = Rating.create(
+        booking_id=UUID(bookings[0].id),
+        resource_id=UUID(res.id),
+        customer_id=UUID(customer_a.id),
+        score=_score(5), comment=note, now=_now(),
+    )
+    without_comment = Rating.create(
+        booking_id=UUID(bookings[1].id),
+        resource_id=UUID(res.id),
+        customer_id=UUID(customer_b.id),
+        score=_score(4), comment=None,
+        now=_now() - timedelta(hours=1),  # older — verifies filter not order
+    )
+    await repo.add(with_comment)
+    await repo.add(without_comment)
 
     items = (await repo.list_with_comment_for_resource(
-        resource_id, page=1, page_size=10,
+        UUID(res.id), page=1, page_size=10,
     )).value
-    assert items == []
+    assert len(items) == 1
+    assert items[0].id == with_comment.id
+    assert items[0].comment is not None
+    assert items[0].comment.value == "foi bom"
 
 
 async def test_list_by_customer_orders_desc(db_session):
