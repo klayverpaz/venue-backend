@@ -12,6 +12,7 @@ from app.infrastructure.repositories.booking_repository import SQLAlchemyBooking
 from app.infrastructure.repositories.notification_repository import (
     SQLAlchemyNotificationRepository,
 )
+from app.infrastructure.repositories.rating_repository import SQLAlchemyRatingRepository
 from app.infrastructure.repositories.resource_repository import SQLAlchemyResourceRepository
 from app.infrastructure.repositories.resource_type_repository import SQLAlchemyResourceTypeRepository
 from app.infrastructure.repositories.user_repository import UserRepository
@@ -101,9 +102,15 @@ async def get_soft_delete_handler(
     )
 
 
-async def get_get_my_handler(res=Depends(_r), u=Depends(_u), rt=Depends(_rt)):
-    return GetMyResourceHandler(res, u, rt)
+async def get_get_my_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
+    res=Depends(_r), u=Depends(_u), rt=Depends(_rt),
+):
+    return GetMyResourceHandler(res, u, rt, SQLAlchemyRatingRepository(s))
 
 
-async def get_list_my_handler(res=Depends(_r), u=Depends(_u), rt=Depends(_rt)):
-    return ListMyResourcesHandler(res, u, rt)
+async def get_list_my_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
+    res=Depends(_r), u=Depends(_u), rt=Depends(_rt),
+):
+    return ListMyResourcesHandler(res, u, rt, SQLAlchemyRatingRepository(s))

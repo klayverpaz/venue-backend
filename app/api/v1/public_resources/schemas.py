@@ -1,4 +1,5 @@
 from __future__ import annotations
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -11,3 +12,5 @@ class OwnerPublicPageResponse(BaseModel):
     owner_slug: str
     full_name: str
     resources: list[ResourceResponse]
+    owner_rating_avg: Decimal | None = None
+    owner_rating_count: int = 0

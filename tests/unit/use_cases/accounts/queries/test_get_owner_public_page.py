@@ -13,6 +13,7 @@ from app.use_cases.accounts.queries.get_owner_public_page import (
 )
 from tests.unit.use_cases.accounts.fakes.in_memory_user_repository import InMemoryUserRepository
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import InMemoryResourceTypeRepository
+from tests.unit.use_cases.ratings.fakes.in_memory_rating_repository import InMemoryRatingRepository
 from tests.unit.use_cases.resources.fakes.in_memory_resource_repository import InMemoryResourceRepository
 from tests.unit.use_cases.subscriptions.fakes.in_memory_subscription_repository import InMemorySubscriptionRepository
 from tests.unit.use_cases.resources.fixtures import seed_resource
@@ -51,7 +52,7 @@ async def _build():
 @pytest.mark.asyncio
 async def test_get_owner_public_page_returns_owner_and_published_resources():
     owner, repo, users, rts, subs = await _build()
-    handler = GetOwnerPublicPageHandler(users, subs, repo, rts)
+    handler = GetOwnerPublicPageHandler(users, subs, repo, rts, InMemoryRatingRepository())
     r = await handler.handle(GetOwnerPublicPageQuery(owner_slug="o-slug"))
     assert r.is_success
     page = r.value
@@ -71,7 +72,7 @@ async def test_get_owner_public_page_404_for_non_owner():
         full_name="C", phone=None, public_slug=None,
     ).value
     await users.add(cust)
-    handler = GetOwnerPublicPageHandler(users, subs, repo, rts)
+    handler = GetOwnerPublicPageHandler(users, subs, repo, rts, InMemoryRatingRepository())
     r = await handler.handle(GetOwnerPublicPageQuery(owner_slug="not-found"))
     assert r.is_failure
     assert r.status_code == 404

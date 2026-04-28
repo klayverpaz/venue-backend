@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -60,6 +61,8 @@ class ResourceResponse(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    rating_avg: Decimal | None = None
+    rating_count: int = 0
 
     @classmethod
     def from_dto(cls, dto: ResourceDto) -> "ResourceResponse":
@@ -106,6 +109,8 @@ class ResourceResponse(BaseModel):
             deleted_at=dto.deleted_at,
             created_at=dto.created_at,
             updated_at=dto.updated_at,
+            rating_avg=dto.rating_avg,
+            rating_count=dto.rating_count,
         )
 
 

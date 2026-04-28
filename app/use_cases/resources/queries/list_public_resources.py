@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from app.domain.accounts.repository import IUserRepository
 from app.domain.catalog.repository import IResourceTypeRepository
+from app.domain.ratings.repository import IRatingRepository
 from app.domain.resources.repository import IResourceRepository
 from app.domain.shared.result import Result
 from app.domain.subscriptions.repository import ISubscriptionRepository
@@ -26,11 +27,13 @@ class ListPublicResourcesHandler:
         users: IUserRepository,
         resource_types: IResourceTypeRepository,
         subscriptions: ISubscriptionRepository,
+        ratings: IRatingRepository,
     ) -> None:
         self._resources = resources
         self._users = users
         self._resource_types = resource_types
         self._subscriptions = subscriptions
+        self._ratings = ratings
 
     async def handle(self, q: ListPublicResourcesQuery) -> Result[list[ResourceDto]]:
         ops_subs = await self._subscriptions.list_all(
@@ -61,13 +64,20 @@ class ListPublicResourcesHandler:
             rt = await self._resource_types.get_by_id(rt_id)
             type_slug_by_id[rt_id] = rt.slug.value if rt else ""
 
+        visible_items = [r for r in items if r.owner_id in owner_active_by_id]
+        resource_ids = [r.id for r in visible_items]
+        aggs_r = await self._ratings.get_aggregates_for_resources(resource_ids)
+        if aggs_r.is_failure:
+            return Result.from_failure(aggs_r)
+        aggs = aggs_r.value
+
         dtos = [
-            ResourceDto.from_entity(
+            ResourceDto.from_entity_with_aggregate(
                 r,
+                aggs[r.id],
                 owner_slug=owner_active_by_id[r.owner_id].public_slug.value,
                 resource_type_slug=type_slug_by_id.get(r.resource_type_id, ""),
             )
-            for r in items
-            if r.owner_id in owner_active_by_id
+            for r in visible_items
         ]
         return Result.success(dtos)

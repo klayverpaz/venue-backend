@@ -13,6 +13,7 @@ from app.use_cases.resources.queries.get_public_resource import (
 )
 from tests.unit.use_cases.accounts.fakes.in_memory_user_repository import InMemoryUserRepository
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import InMemoryResourceTypeRepository
+from tests.unit.use_cases.ratings.fakes.in_memory_rating_repository import InMemoryRatingRepository
 from tests.unit.use_cases.resources.fakes.in_memory_resource_repository import InMemoryResourceRepository
 from tests.unit.use_cases.subscriptions.fakes.in_memory_subscription_repository import InMemorySubscriptionRepository
 from tests.unit.use_cases.resources.fixtures import seed_resource
@@ -56,7 +57,7 @@ async def _build_environment(*, sub_status=SubStatus.ACTIVE, user_active=True, p
 @pytest.mark.asyncio
 async def test_get_public_resource_happy():
     repo, users, rts, subs, res = await _build_environment(sub_status=SubStatus.ACTIVE)
-    handler = GetPublicResourceHandler(repo, users, rts, subs)
+    handler = GetPublicResourceHandler(repo, users, rts, subs, InMemoryRatingRepository())
     r = await handler.handle(GetPublicResourceQuery(
         owner_slug="o-slug", resource_slug="arena-zl",
     ))
@@ -67,7 +68,7 @@ async def test_get_public_resource_happy():
 @pytest.mark.asyncio
 async def test_get_public_resource_404_when_owner_inactive_subscription():
     repo, users, rts, subs, res = await _build_environment(sub_status=SubStatus.INACTIVE)
-    handler = GetPublicResourceHandler(repo, users, rts, subs)
+    handler = GetPublicResourceHandler(repo, users, rts, subs, InMemoryRatingRepository())
     r = await handler.handle(GetPublicResourceQuery(
         owner_slug="o-slug", resource_slug="arena-zl",
     ))
@@ -78,7 +79,7 @@ async def test_get_public_resource_404_when_owner_inactive_subscription():
 @pytest.mark.asyncio
 async def test_get_public_resource_404_when_user_deactivated():
     repo, users, rts, subs, res = await _build_environment(user_active=False)
-    handler = GetPublicResourceHandler(repo, users, rts, subs)
+    handler = GetPublicResourceHandler(repo, users, rts, subs, InMemoryRatingRepository())
     r = await handler.handle(GetPublicResourceQuery(
         owner_slug="o-slug", resource_slug="arena-zl",
     ))
@@ -89,7 +90,7 @@ async def test_get_public_resource_404_when_user_deactivated():
 @pytest.mark.asyncio
 async def test_get_public_resource_404_when_unpublished():
     repo, users, rts, subs, res = await _build_environment(published=False)
-    handler = GetPublicResourceHandler(repo, users, rts, subs)
+    handler = GetPublicResourceHandler(repo, users, rts, subs, InMemoryRatingRepository())
     r = await handler.handle(GetPublicResourceQuery(
         owner_slug="o-slug", resource_slug="arena-zl",
     ))

@@ -53,6 +53,8 @@ async def get_owner_page(
         owner_slug=page.owner_slug,
         full_name=page.full_name,
         resources=[ResourceResponse.from_dto(d) for d in page.resources],
+        owner_rating_avg=page.owner_rating_avg,
+        owner_rating_count=page.owner_rating_count,
     )
 
 

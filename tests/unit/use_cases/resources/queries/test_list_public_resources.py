@@ -13,6 +13,7 @@ from app.use_cases.resources.queries.list_public_resources import (
 )
 from tests.unit.use_cases.accounts.fakes.in_memory_user_repository import InMemoryUserRepository
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import InMemoryResourceTypeRepository
+from tests.unit.use_cases.ratings.fakes.in_memory_rating_repository import InMemoryRatingRepository
 from tests.unit.use_cases.resources.fakes.in_memory_resource_repository import InMemoryResourceRepository
 from tests.unit.use_cases.subscriptions.fakes.in_memory_subscription_repository import InMemorySubscriptionRepository
 from tests.unit.use_cases.resources.fixtures import seed_resource
@@ -63,7 +64,7 @@ async def test_list_public_filters_by_operational_owner():
     res_b.publish()
     await repo.update(res_b)
 
-    handler = ListPublicResourcesHandler(repo, users, rts, subs)
+    handler = ListPublicResourcesHandler(repo, users, rts, subs, InMemoryRatingRepository())
     r = await handler.handle(ListPublicResourcesQuery())
     assert r.is_success
     slugs = {dto.slug for dto in r.value}

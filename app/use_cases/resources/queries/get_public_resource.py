@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from app.domain.accounts.repository import IUserRepository
 from app.domain.accounts.role import Role
 from app.domain.catalog.repository import IResourceTypeRepository
+from app.domain.ratings.repository import IRatingRepository
 from app.domain.resources.repository import IResourceRepository
 from app.domain.shared.result import Result
 from app.domain.subscriptions.repository import ISubscriptionRepository
@@ -23,11 +24,13 @@ class GetPublicResourceHandler:
         users: IUserRepository,
         resource_types: IResourceTypeRepository,
         subscriptions: ISubscriptionRepository,
+        ratings: IRatingRepository,
     ) -> None:
         self._resources = resources
         self._users = users
         self._resource_types = resource_types
         self._subscriptions = subscriptions
+        self._ratings = ratings
 
     async def handle(self, q: GetPublicResourceQuery) -> Result[ResourceDto]:
         owner = await self._users.get_by_public_slug(q.owner_slug)
@@ -44,9 +47,16 @@ class GetPublicResourceHandler:
 
         rt = await self._resource_types.get_by_id(res.resource_type_id)
         rt_slug = rt.slug.value if rt else ""
+
+        aggs_r = await self._ratings.get_aggregates_for_resources([res.id])
+        if aggs_r.is_failure:
+            return Result.from_failure(aggs_r)
+        aggs = aggs_r.value
+
         return Result.success(
-            ResourceDto.from_entity(
+            ResourceDto.from_entity_with_aggregate(
                 res,
+                aggs[res.id],
                 owner_slug=owner.public_slug.value,
                 resource_type_slug=rt_slug,
             )

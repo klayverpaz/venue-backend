@@ -8,6 +8,7 @@ from app.infrastructure.db.session import get_session
 from app.infrastructure.repositories.owner_subscription_repository import (
     SQLAlchemyOwnerSubscriptionRepository,
 )
+from app.infrastructure.repositories.rating_repository import SQLAlchemyRatingRepository
 from app.infrastructure.repositories.resource_repository import SQLAlchemyResourceRepository
 from app.infrastructure.repositories.resource_type_repository import SQLAlchemyResourceTypeRepository
 from app.infrastructure.repositories.user_repository import UserRepository
@@ -33,18 +34,21 @@ def _sub(s: Annotated[AsyncSession, Depends(get_session)]):
 
 
 async def get_public_resource_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
     res=Depends(_r), u=Depends(_u), rt=Depends(_rt), sub=Depends(_sub),
 ):
-    return GetPublicResourceHandler(res, u, rt, sub)
+    return GetPublicResourceHandler(res, u, rt, sub, SQLAlchemyRatingRepository(s))
 
 
 async def get_list_public_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
     res=Depends(_r), u=Depends(_u), rt=Depends(_rt), sub=Depends(_sub),
 ):
-    return ListPublicResourcesHandler(res, u, rt, sub)
+    return ListPublicResourcesHandler(res, u, rt, sub, SQLAlchemyRatingRepository(s))
 
 
 async def get_owner_page_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
     u=Depends(_u), sub=Depends(_sub), res=Depends(_r), rt=Depends(_rt),
 ):
-    return GetOwnerPublicPageHandler(u, sub, res, rt)
+    return GetOwnerPublicPageHandler(u, sub, res, rt, SQLAlchemyRatingRepository(s))

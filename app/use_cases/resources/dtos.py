@@ -1,9 +1,12 @@
 from __future__ import annotations
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Self
 from uuid import UUID
 
+from app.domain.ratings.aggregate import RatingAggregate
 from app.domain.resources.resource import Resource
 
 
@@ -62,6 +65,25 @@ class ResourceDto:
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    rating_avg: Decimal | None = None
+    rating_count: int = 0
+
+    @classmethod
+    def from_entity_with_aggregate(
+        cls,
+        res: "Resource",
+        aggregate: RatingAggregate,
+        *,
+        owner_slug: str,
+        resource_type_slug: str,
+    ) -> "ResourceDto":
+        """Build ResourceDto with rating fields populated from a RatingAggregate.
+        All non-rating fields come from the existing from_entity path."""
+        return dataclasses.replace(
+            cls.from_entity(res, owner_slug=owner_slug, resource_type_slug=resource_type_slug),
+            rating_avg=aggregate.avg_score,
+            rating_count=aggregate.count,
+        )
 
     @classmethod
     def from_entity(

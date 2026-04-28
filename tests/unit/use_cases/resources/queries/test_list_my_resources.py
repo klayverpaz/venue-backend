@@ -9,6 +9,7 @@ from app.use_cases.resources.queries.list_my_resources import (
 )
 from tests.unit.use_cases.accounts.fakes.in_memory_user_repository import InMemoryUserRepository
 from tests.unit.use_cases.catalog.fakes.in_memory_resource_type_repository import InMemoryResourceTypeRepository
+from tests.unit.use_cases.ratings.fakes.in_memory_rating_repository import InMemoryRatingRepository
 from tests.unit.use_cases.resources.fakes.in_memory_resource_repository import InMemoryResourceRepository
 from tests.unit.use_cases.resources.fixtures import seed_resource
 
@@ -40,7 +41,7 @@ async def test_list_my_resources_includes_drafts_excludes_deleted():
     rt.id = res_a.resource_type_id
     await rts.add(rt)
 
-    handler = ListMyResourcesHandler(repo, users, rts)
+    handler = ListMyResourcesHandler(repo, users, rts, InMemoryRatingRepository())
     r = await handler.handle(ListMyResourcesQuery(actor_id=res_a.owner_id))
     assert r.is_success
     slugs = {dto.slug for dto in r.value}
