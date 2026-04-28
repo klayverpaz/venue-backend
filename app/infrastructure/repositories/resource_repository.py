@@ -25,6 +25,7 @@ from app.domain.shared.value_objects.slug import Slug
 from app.domain.shared.value_objects.time_window import TimeWindow
 from app.domain.shared.weekday import Weekday
 from app.infrastructure.db.mappings.resource import ResourceModel
+from app.infrastructure.db.mappings.user import UserModel
 
 
 def _ensure_utc(dt: datetime | None) -> datetime | None:
@@ -243,6 +244,20 @@ class SQLAlchemyResourceRepository(IResourceRepository):
         stmt = stmt.order_by(ResourceModel.created_at.desc()).limit(limit).offset(offset)
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_entity(r) for r in rows]
+
+    async def get_by_owner_slug_and_resource_slug(
+        self, owner_slug: str, resource_slug: str,
+    ) -> Resource | None:
+        stmt = (
+            select(ResourceModel)
+            .join(UserModel, UserModel.id == ResourceModel.owner_id)
+            .where(
+                UserModel.public_slug == owner_slug,
+                ResourceModel.slug == resource_slug,
+            )
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(row) if row else None
 
     async def list_published_by_owner(self, owner_id, *, limit=50, offset=0):
         stmt = (

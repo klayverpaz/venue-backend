@@ -185,3 +185,33 @@ async def test_list_published_filters_by_owner_ids(db_session: AsyncSession):
     listed = await repo.list_published(owner_ids_filter=[owner_a.id])
     slugs = {r.slug.value for r in listed}
     assert slugs == {"from-a"}
+
+
+@pytest.mark.asyncio
+async def test_get_by_owner_slug_and_resource_slug(db_session: AsyncSession):
+    owner, rt = await _seed_owner_and_type(db_session)
+    repo = SQLAlchemyResourceRepository(db_session)
+    res = _make_resource(owner.id, rt.id, slug="quadra-x")
+    await repo.add(res)
+    await db_session.flush()
+
+    owner_slug_str = owner.public_slug.value
+
+    # Hit: correct owner_slug + resource_slug
+    fetched = await repo.get_by_owner_slug_and_resource_slug(
+        owner_slug_str, "quadra-x",
+    )
+    assert fetched is not None
+    assert fetched.id == res.id
+
+    # Miss: wrong resource_slug
+    missing = await repo.get_by_owner_slug_and_resource_slug(
+        owner_slug_str, "nonexistent",
+    )
+    assert missing is None
+
+    # Miss: wrong owner_slug
+    missing2 = await repo.get_by_owner_slug_and_resource_slug(
+        "wrong-owner", "quadra-x",
+    )
+    assert missing2 is None

@@ -58,3 +58,9 @@ class IResourceRepository(Protocol):
         offset: int = 0,
     ) -> list[Resource]:
         ...
+
+    async def get_by_owner_slug_and_resource_slug(
+        self, owner_slug: str, resource_slug: str,
+    ) -> Resource | None:
+        """Lookup by owner's public_slug + resource's slug. Returns None if not found."""
+        ...
