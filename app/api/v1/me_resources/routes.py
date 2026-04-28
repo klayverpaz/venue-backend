@@ -1,10 +1,29 @@
 from __future__ import annotations
+from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import CurrentUser, require_role
 from app.api.error_handler import unwrap
+from app.api.v1.me_bookings.deps import (
+    get_agenda_handler,
+    get_list_resource_bookings_handler,
+)
+from app.api.v1.me_bookings.schemas import (
+    AgendaResponse,
+    BookingListResponse,
+)
+from app.domain.bookings.booking_status import BookingStatus
+from app.use_cases.bookings.queries.get_agenda import (
+    GetAgendaHandler,
+    GetAgendaQuery,
+)
+from app.use_cases.bookings.queries.list_resource_bookings import (
+    ListResourceBookingsHandler,
+    ListResourceBookingsQuery,
+)
 from app.api.v1.me_resources.deps import (
     get_create_handler, get_update_metadata_handler, get_replace_hours_handler,
     get_replace_rules_handler, get_replace_base_attrs_handler,
@@ -264,3 +283,44 @@ async def soft_delete(
         actor_id=user.user_id, resource_id=resource_id,
     )))
     return None
+
+
+@router.get(
+    "/{resource_id}/bookings",
+    response_model=BookingListResponse,
+)
+async def list_resource_bookings(
+    resource_id: UUID,
+    user: CurrentUser,
+    handler: Annotated[
+        ListResourceBookingsHandler, Depends(get_list_resource_bookings_handler),
+    ],
+    status_filter: BookingStatus | None = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+):
+    dto = unwrap(await handler.handle(ListResourceBookingsQuery(
+        actor_id=user.user_id, resource_id=resource_id,
+        status=status_filter, page=page, page_size=page_size,
+    )))
+    return BookingListResponse.from_dto(dto)
+
+
+@router.get(
+    "/{resource_id}/agenda",
+    response_model=AgendaResponse,
+)
+async def get_owner_agenda(
+    resource_id: UUID,
+    user: CurrentUser,
+    handler: Annotated[GetAgendaHandler, Depends(get_agenda_handler)],
+    range_start: datetime = Query(..., alias="from"),
+    range_end: datetime = Query(..., alias="to"),
+):
+    dto = unwrap(await handler.handle(GetAgendaQuery(
+        resource_id=resource_id,
+        range_start=range_start,
+        range_end=range_end,
+        actor_id=user.user_id,
+    )))
+    return AgendaResponse.from_dto(dto)
