@@ -40,7 +40,7 @@ A user has exactly one role. Roles are immutable except by an explicit admin han
 | 11 | Discovery: each owner and each resource gets a public URL (slug-based). Plus a platform-wide listing filterable by resource type and city/region. No map, no geosearch. Ratings are aggregated from completed bookings. | Fits the realistic acquisition model (owners drive traffic via social) without skipping browse-ability. |
 | 12 | Cancellations: owner can cancel anytime; customer can cancel until `customer_cancellation_cutoff_hours` before slot start. Audit trail on the booking. | Encodes the natural asymmetry; no monetary penalties (money is off-platform). |
 | 13 | Notifications: in-app inbox for every event. **Email deferred** (MVP scope cut, see plan-07-notifications-design.md §1; port reintroducible later). | In-app coverage is enough for the MVP feedback loop; email/SMS stays a future plan. |
-| 14 | Idempotency keys accepted on `POST /me/bookings` and approval/reject endpoints. | Cheap to add; avoids the inevitable double-click / network-retry duplicate booking. |
+| 14 | Booking creation uses **domain-level natural dedup**: same customer + resource + overlapping slot already PENDING/APPROVED → 409 `BookingAlreadyExists`. State-machine idempotency covers approve/reject/cancel (subsequent calls see status != PENDING and return 409 `BookingInvalidStateTransition`). **`Idempotency-Key` infrastructure deferred** — see plan-08-bookings-design.md §1. | Natural key (customer × resource × slot) is the right primary; generic Idempotency-Key reintroducible later if PSP endpoints land. |
 | 15 | Localization: identifiers and code in English; user-facing strings in pt-BR. **VO and handler errors are stable code identifiers** (e.g., `"NameCannotBeEmpty"`); the HTTP boundary in `app/api/error_handler.py` maps codes → pt-BR. | Stable contract for tests + i18n, decoupled from display language. |
 | 16 | **Money is represented as `int` cents (smallest currency unit), wrapped in a `Money` VO.** Float is forbidden for monetary values. | Floats can't represent decimals exactly (`0.1 + 0.2 ≠ 0.3`); industry standard for marketplaces (Stripe, Mercado Pago, Adyen) is integer minor units. |
 | 17 | **Domain entities NEVER hold raw primitives where a VO exists.** `User.full_name: Name`, not `str`; `Booking.slot_range: DateTimeRange`, not two datetimes; etc. DB columns for VO-backed strings are `TEXT` (no `VARCHAR(N)`) — the VO is the single source of truth for length. | Centralizes validation and prevents "this `name` got past validation because it took a different path" bugs. |
@@ -78,9 +78,10 @@ Cross-feature handlers expected:
 
 | Handler | Feature | Repos injected | Responsibility |
 |---|---|---|---|
-| `RequestBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `ISubscriptionRepository`, `INotificationService` | Validate, price, persist `Booking{PENDING}`, notify owner. |
-| `ApproveBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Approve target + auto-reject overlapping pendings in one transaction; notify all parties. |
-| `CancelBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Branch by actor role; enforce customer cutoff; notify counterpart. |
+| `RequestBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `ISubscriptionRepository`, `INotificationService` | Validate (resource gates, slot grid, operating hours, future-only, natural dedup), price via `Resource.compute_price`, persist `Booking{PENDING}`, notify owner. |
+| `ApproveBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `ISubscriptionRepository`, `INotificationService`, `IBookingLockService` | Acquires per-resource advisory lock; under lock, re-fetches PENDING target, scans overlapping PENDINGs, transitions target → APPROVED + competitors → REJECTED in one TX; notifies all parties outside the lock. |
+| `RejectBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Owner manual reject of PENDING. State-machine handles concurrency. |
+| `CancelBookingHandler` | `bookings/commands` | `IBookingRepository`, `IResourceRepository`, `INotificationService` | Single handler; branches on actor role. Customer enforces `customer_cancellation_cutoff_hours`; owner has no time bound. Notifies counterpart. |
 | `PromoteUserRoleHandler` | `accounts/commands` | `IUserRepository` | Admin-only; the only role-mutation entrypoint. |
 | `SetOwnerSubscriptionStatusHandler` | `subscriptions/commands` | `ISubscriptionRepository`, `IUserRepository` | Admin-only; verifies target user is `OWNER`. |
 | `CreateRatingHandler` | `ratings/commands` | `IRatingRepository`, `IBookingRepository` | Verifies booking is APPROVED + ended + within 90d window + customer matches; persists rating. (Plan 07 dropped the owner notification — `BOOKING_RATED` is out of scope; rating signal flows through `Resource.rating_avg` aggregates added by Plan 09.) |
@@ -256,7 +257,9 @@ CustomAttribute (VO, composite)
 - `pricing_rules` may not overlap each other within the same weekday × time window. Gaps are allowed and fall back to `base_price_cents`.
 - `base_attributes` satisfies `resource_type.attribute_schema`: every required key present, every value matches `data_type`, every `ENUM` value is in `enum_values`.
 - `custom_attribute.key` values unique within a resource and disjoint from `base_attributes` keys.
-- Soft-delete (`deleted_at != NULL`) blocked when there is any `APPROVED` booking with `slot_range.start_at >= now`.
+- Soft-delete (`deleted_at != NULL`):
+  - Blocked (409 `ResourceHasFutureApprovedBookings`) when any `APPROVED` booking on the resource has `slot_range.start_at >= now`.
+  - Otherwise, all `PENDING` bookings on the resource are auto-`CANCELLED` with `reason="resource_deleted"` in the same transaction; each affected customer receives a `BOOKING_CANCELLED` notification with `cancelled_by=owner` payload.
 
 ### 5.4 `bookings` — `Booking`
 
@@ -270,7 +273,6 @@ Booking
 ├── customer_note: ShortDescription | None
 ├── total_price_cents: Money                # frozen at request time
 ├── status_history: list[StatusChange]
-├── cancelled_by: ActorRef | None           # OWNER | CUSTOMER, with user_id
 └── created_at, updated_at
 
 # Derived: slot_count = (slot_range.end_at − slot_range.start_at) / resource.slot_duration_minutes
@@ -292,6 +294,11 @@ StatusChange (VO, composite)
 - For a given `resource_id`, **at most one** `APPROVED` booking may overlap any moment (enforced by exclusion constraint + advisory lock; see §6).
 - Customer cancellation requires `now < slot_range.start_at − resource.customer_cancellation_cutoff_hours`. Owner cancellation has no time bound.
 - `total_price_cents` is computed once at request creation; later changes to the resource's pricing do not retroactively alter it.
+
+**Plan 08 deliberate cuts (see `docs/superpowers/specs/2026-04-27-plan-08-bookings-design.md`):**
+- `cancelled_by` field removed — derivable from `status_history[-1]` when `status == CANCELLED`. The `status_history` is the audit source of truth.
+- Owner cancellation reason kept optional. Backend never enforces; frontend may encourage.
+- `Idempotency-Key` deferred in favor of domain-level natural dedup (see §3 #14).
 
 ### 5.5 `subscriptions` — `OwnerSubscription`
 
@@ -464,7 +471,7 @@ GET  /me
 ### 7.3 Customer (role = CUSTOMER)
 
 ```
-POST   /me/bookings                          # body: { resource_id, slot_range, customer_note }; Idempotency-Key supported
+POST   /me/bookings                          # body: { resource_id, slot_range, customer_note }; natural dedup (see §3 #14)
 GET    /me/bookings?status=
 GET    /me/bookings/{id}
 POST   /me/bookings/{id}/cancel              # 403 past cutoff
@@ -492,7 +499,7 @@ DELETE /me/resources/{id}                    # soft-delete; blocked if future ap
 # Bookings on my resources
 GET    /me/resources/{id}/bookings?status=
 GET    /me/resources/{id}/agenda?from=&to=
-POST   /me/bookings/{booking_id}/approve     # Idempotency-Key supported
+POST   /me/bookings/{booking_id}/approve     # state-machine idempotency (see §3 #14)
 POST   /me/bookings/{booking_id}/reject      # body: { reason? }
 POST   /me/bookings/{booking_id}/cancel
 
@@ -540,7 +547,7 @@ The plan order below is the contract for `docs/superpowers/plans/`.
 5. **Plan 05 — Subscriptions.** `OwnerSubscription` aggregate; admin-only mutation; `is_operational()` gating.
 6. **Plan 06 — Resources.** `Resource` aggregate using `Slug`/`Name`/`ShortDescription`/`Money`/`TimeWindow`/`IanaTimezone`/`SlotDuration`/`CancellationCutoff`. Owner CRUD + public read.
 7. **Plan 07 — Notifications.** `Notification` aggregate (persistent in-app inbox) + `INotificationRepository` + `PersistentNotificationService` adapter. `NotifKind` grows to 5 values: `SUBSCRIPTION_CHANGED` (existing) plus `BOOKING_REQUESTED` / `BOOKING_APPROVED` / `BOOKING_REJECTED` / `BOOKING_CANCELLED` (Plan 08 emits). `GET /v1/me/notifications` (cursor paged) + `POST /v1/me/notifications/{id}/read`. Email and `BOOKING_RATED` deferred — see plan-07 design doc §1.
-8. **Plan 08 — Bookings.** `Booking` aggregate using `DateTimeRange`/`Money`/`ShortDescription`. Approval transaction with advisory lock + exclusion constraint. Nightly expiry job.
+8. **Plan 08 — Bookings.** `Booking` aggregate (5-state machine PENDING → {APPROVED, REJECTED, CANCELLED, EXPIRED}; APPROVED → CANCELLED) + `IBookingRepository` + `IBookingLockService` (Postgres advisory_xact_lock + in-memory async-lock test adapter). 5 mutation handlers (request/approve-with-auto-rejection/reject/cancel/expire-cron); 4 query handlers (list-my, get-my, list-resource, agenda — shared public + owner shape). 10 endpoints (4 customer + 5 owner + 1 public agenda). Concurrency: Postgres `btree_gist` exclusion constraint as belt-and-suspenders. Plan 06 retroactives: `Resource.compute_price`, `Weekday.from_iso`, `SoftDeleteResourceHandler` cascade. Natural dedup replaces `Idempotency-Key` — see plan-08 design §1.
 9. **Plan 09 — Ratings.** `Rating` aggregate. Customer create/edit endpoints. Public list with comment. Admin moderation. `Resource` GETs gain `rating_avg` + `rating_count` aggregates.
 10. **Plan 10 — Seed + production wiring.** Bootstrap admin account (env-driven), seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
 
