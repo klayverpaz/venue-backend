@@ -14,6 +14,7 @@ from app.infrastructure.db.base import Base
 from app.infrastructure.db.mappings import booking  # noqa: F401
 from app.infrastructure.db.mappings import notification  # noqa: F401
 from app.infrastructure.db.mappings import owner_subscription  # noqa: F401
+from app.infrastructure.db.mappings import rating  # noqa: F401
 from app.infrastructure.db.mappings import resource  # noqa: F401
 from app.infrastructure.db.mappings import resource_type  # noqa: F401  (registers metadata)
 from app.infrastructure.db.mappings import user  # noqa: F401
