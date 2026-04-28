@@ -129,6 +129,19 @@ def test_no_orphan_translations_in_mapping():
         "TimeWindowInvalidType",
         # Plan 07 — notifications
         "NotificationNotFound",
+        # Plan 08 — bookings handler-level
+        "BookingNotFound",
+        "ResourceNotPublished",
+        "OwnerSubscriptionInactive",
+        "BookingSlotInPast",
+        "BookingSlotNotAligned",
+        "BookingOutsideOperatingHours",
+        "BookingAlreadyExists",
+        "BookingInvalidStateTransition",
+        "BookingCancellationPastCutoff",
+        "BookingHasApprovedOverlap",
+        "AgendaRangeTooWide",
+        "ResourceHasFutureApprovedBookings",
     }
     real_orphans = [c for c in orphans if c not in handler_level_allowlist]
 

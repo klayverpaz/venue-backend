@@ -185,6 +185,20 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     StatusChange.STATUS_CHANGE_AT_NOT_TZ_AWARE: "Timestamp da mudança de status precisa ter fuso horário.",
     StatusChange.STATUS_CHANGE_REASON_TOO_LONG: "Motivo da mudança de status não pode ultrapassar 500 caracteres.",
     StatusChange.STATUS_CHANGE_INVALID_TRANSITION: "Transição de status inválida.",
+
+    # --- Plan 08 — bookings (handler-level) ---
+    "BookingNotFound": "Reserva não encontrada.",
+    "ResourceNotPublished": "Recurso indisponível para reserva.",
+    "OwnerSubscriptionInactive": "Proprietário não pode aprovar reservas no momento.",
+    "BookingSlotInPast": "Não é possível reservar horário passado.",
+    "BookingSlotNotAligned": "Horário não alinhado à grade de slots.",
+    "BookingOutsideOperatingHours": "Horário fora do funcionamento do recurso.",
+    "BookingAlreadyExists": "Você já tem uma reserva ativa para esse horário.",
+    "BookingInvalidStateTransition": "Transição de estado de reserva inválida.",
+    "BookingCancellationPastCutoff": "Prazo de cancelamento expirado.",
+    "BookingHasApprovedOverlap": "Horário já tem reserva aprovada.",
+    "AgendaRangeTooWide": "Intervalo da agenda excede o máximo de 31 dias.",
+    "ResourceHasFutureApprovedBookings": "Recurso possui reservas aprovadas futuras.",
 }
 
 
