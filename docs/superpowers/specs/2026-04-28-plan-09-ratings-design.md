@@ -167,10 +167,10 @@ GET    /v1/me/ratings?page=&page_size=
 
 **Public:**
 ```
-GET    /v1/resources/{owner_slug}/{resource_slug}/ratings?page=&page_size=
+GET    /v1/owners/{owner_slug}/resources/{resource_slug}/ratings?page=&page_size=
 ```
 
-The path uses two-slug `{owner_slug}/{resource_slug}` matching the Plan 08 spec-refresh precedent (the agenda endpoint uses the same shape). The single-slug form §7.1 originally specified is dropped in the spec refresh.
+The path mirrors the existing public resource detail endpoint `GET /v1/owners/{owner_slug}/resources/{resource_slug}` (Plan 06's owners-prefixed style). The single-slug form §7.1 originally specified is dropped in the spec refresh. Plan 08's agenda endpoint uses a different prefix (`/v1/resources/{owner_slug}/{resource_slug}/agenda`); aligning that to the owners-prefix is out of scope for Plan 09 and tracked in the polish backlog.
 
 **Removed compared to canonical §7:**
 - `GET /v1/admin/ratings?hidden=&resource_id=` — moderation dropped.
@@ -180,7 +180,7 @@ The path uses two-slug `{owner_slug}/{resource_slug}` matching the Plan 08 spec-
 
 ### 3.7 Privacy: customer identity in public ratings
 
-The public ratings list (`GET /v1/resources/{owner_slug}/{resource_slug}/ratings`) returns `RatingResponseDto` which **omits `customer_id`** and only includes `score`, `comment`, `created_at`. The resource owner viewing aggregates also doesn't get per-customer attribution at the resource level (no owner read endpoint in MVP). Customers reviewing their own ratings (`GET /v1/me/ratings`) see their own `customer_id` echoed back (or it can be omitted — equivalent since they're the only customer in the response).
+The public ratings list (`GET /v1/owners/{owner_slug}/resources/{resource_slug}/ratings`) returns `RatingResponseDto` which **omits `customer_id`** and only includes `score`, `comment`, `created_at`. The resource owner viewing aggregates also doesn't get per-customer attribution at the resource level (no owner read endpoint in MVP). Customers reviewing their own ratings (`GET /v1/me/ratings`) see their own `customer_id` echoed back (or it can be omitted — equivalent since they're the only customer in the response).
 
 Internal DB and admin DB pokes always preserve `customer_id` for compliance / future moderation.
 
