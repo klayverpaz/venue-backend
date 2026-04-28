@@ -196,7 +196,6 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "BookingAlreadyExists": "Você já tem uma reserva ativa para esse horário.",
     "BookingInvalidStateTransition": "Transição de estado de reserva inválida.",
     "BookingCancellationPastCutoff": "Prazo de cancelamento expirado.",
-    "BookingHasApprovedOverlap": "Horário já tem reserva aprovada.",
     "AgendaRangeTooWide": "Intervalo da agenda excede o máximo de 31 dias.",
     "ResourceHasFutureApprovedBookings": "Recurso possui reservas aprovadas futuras.",
 }

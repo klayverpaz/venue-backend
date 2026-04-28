@@ -139,7 +139,6 @@ def test_no_orphan_translations_in_mapping():
         "BookingAlreadyExists",
         "BookingInvalidStateTransition",
         "BookingCancellationPastCutoff",
-        "BookingHasApprovedOverlap",
         "AgendaRangeTooWide",
         "ResourceHasFutureApprovedBookings",
     }
