@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, Query
 from app.api.error_handler import unwrap
 from app.api.v1.me_bookings.deps import get_agenda_handler
 from app.api.v1.me_bookings.schemas import AgendaResponse
+from app.api.v1.me_ratings.deps import get_list_public_ratings_handler
+from app.api.v1.me_ratings.schemas import PublicRatingListResponse
 from app.api.v1.me_resources.schemas import ResourceListResponse, ResourceResponse
 from app.api.v1.public_resources.deps import (
     get_list_public_handler, get_owner_page_handler, get_public_resource_handler,
@@ -15,6 +17,10 @@ from app.api.v1.public_resources.schemas import OwnerPublicPageResponse
 from app.use_cases.accounts.queries.get_owner_public_page import GetOwnerPublicPageQuery
 from app.use_cases.bookings.queries.get_agenda import (
     GetAgendaHandler, GetAgendaQuery,
+)
+from app.use_cases.ratings.queries.list_public_ratings import (
+    ListPublicRatingsForResourceHandler,
+    ListPublicRatingsForResourceQuery,
 )
 from app.use_cases.resources.queries.get_public_resource import GetPublicResourceQuery
 from app.use_cases.resources.queries.list_public_resources import ListPublicResourcesQuery
@@ -92,3 +98,24 @@ async def get_public_agenda(
         actor_id=None,
     )))
     return AgendaResponse.from_dto(dto)
+
+
+@router.get(
+    "/owners/{owner_slug}/resources/{resource_slug}/ratings",
+    response_model=PublicRatingListResponse,
+)
+async def list_public_ratings(
+    owner_slug: str,
+    resource_slug: str,
+    handler: Annotated[
+        ListPublicRatingsForResourceHandler,
+        Depends(get_list_public_ratings_handler),
+    ],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+):
+    dto = unwrap(await handler.handle(ListPublicRatingsForResourceQuery(
+        owner_slug=owner_slug, resource_slug=resource_slug,
+        page=page, page_size=page_size,
+    )))
+    return PublicRatingListResponse.from_dto(dto)
