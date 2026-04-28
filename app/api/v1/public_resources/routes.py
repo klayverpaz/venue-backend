@@ -1,13 +1,21 @@
 from __future__ import annotations
+from datetime import datetime
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 
 from app.api.error_handler import unwrap
+from app.api.v1.me_bookings.deps import get_agenda_handler
+from app.api.v1.me_bookings.schemas import AgendaResponse
 from app.api.v1.me_resources.schemas import ResourceListResponse, ResourceResponse
 from app.api.v1.public_resources.deps import (
     get_list_public_handler, get_owner_page_handler, get_public_resource_handler,
 )
 from app.api.v1.public_resources.schemas import OwnerPublicPageResponse
 from app.use_cases.accounts.queries.get_owner_public_page import GetOwnerPublicPageQuery
+from app.use_cases.bookings.queries.get_agenda import (
+    GetAgendaHandler, GetAgendaQuery,
+)
 from app.use_cases.resources.queries.get_public_resource import GetPublicResourceQuery
 from app.use_cases.resources.queries.list_public_resources import ListPublicResourcesQuery
 
@@ -61,3 +69,24 @@ async def get_public_resource(
         owner_slug=owner_slug, resource_slug=resource_slug,
     )))
     return ResourceResponse.from_dto(dto)
+
+
+@router.get(
+    "/resources/{owner_slug}/{resource_slug}/agenda",
+    response_model=AgendaResponse,
+)
+async def get_public_agenda(
+    owner_slug: str,
+    resource_slug: str,
+    handler: Annotated[GetAgendaHandler, Depends(get_agenda_handler)],
+    range_start: datetime = Query(..., alias="from"),
+    range_end: datetime = Query(..., alias="to"),
+):
+    dto = unwrap(await handler.handle(GetAgendaQuery(
+        owner_slug=owner_slug,
+        resource_slug=resource_slug,
+        range_start=range_start,
+        range_end=range_end,
+        actor_id=None,
+    )))
+    return AgendaResponse.from_dto(dto)
