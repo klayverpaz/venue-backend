@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 from uuid import UUID
 
 from app.domain.accounts.role import Role
@@ -36,10 +37,12 @@ class CancelBookingHandler:
         bookings: IBookingRepository,
         resources: IResourceRepository,
         notifications: INotificationService,
+        clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._bookings = bookings
         self._resources = resources
         self._notifications = notifications
+        self._clock = clock
 
     async def handle(self, cmd: CancelBookingCommand) -> Result[BookingDto]:
         # 1. Load booking — IBookingRepository.get_by_id returns Result[Booking | None].
@@ -64,7 +67,7 @@ class CancelBookingHandler:
         # an owner-customer booking the same resource skips cutoff).
         if is_customer and not is_owner:
             cutoff_hours = resource.customer_cancellation_cutoff_hours.hours
-            if _utcnow() >= booking.slot_range.start_at - timedelta(hours=cutoff_hours):
+            if self._clock() >= booking.slot_range.start_at - timedelta(hours=cutoff_hours):
                 return Result.failure(
                     "BookingCancellationPastCutoff", status_code=403,
                 )
@@ -72,7 +75,7 @@ class CancelBookingHandler:
         actor_role = Role.OWNER if is_owner else Role.CUSTOMER
         transition = booking.cancel(
             actor_id=cmd.actor_id, actor_role=actor_role,
-            now=_utcnow(), reason=cmd.reason,
+            now=self._clock(), reason=cmd.reason,
         )
         if transition.is_failure:
             return Result.failure(

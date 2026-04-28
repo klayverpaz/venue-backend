@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 from uuid import UUID
 
 from app.domain.bookings.booking import Booking
@@ -37,11 +38,13 @@ class RequestBookingHandler:
         resources: IResourceRepository,
         subscriptions: ISubscriptionRepository,
         notifications: INotificationService,
+        clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._bookings = bookings
         self._resources = resources
         self._subscriptions = subscriptions
         self._notifications = notifications
+        self._clock = clock
 
     async def handle(self, cmd: RequestBookingCommand) -> Result[BookingDto]:
         # 1. VO-validate inputs.
@@ -78,7 +81,7 @@ class RequestBookingHandler:
             return Result.failure("ResourceNotPublished", status_code=404)
 
         # 4. Slot must be in the future.
-        if slot_range.start_at <= _utcnow():
+        if slot_range.start_at <= self._clock():
             return Result.failure("BookingSlotInPast", status_code=422)
 
         # 5. Slot grid alignment + operating hours containment.
@@ -103,7 +106,7 @@ class RequestBookingHandler:
             slot_range=slot_range,
             total_price_cents=price,
             customer_note=note,
-            now=_utcnow(),
+            now=self._clock(),
         )
         add_r = await self._bookings.add(booking)
         if add_r.is_failure:

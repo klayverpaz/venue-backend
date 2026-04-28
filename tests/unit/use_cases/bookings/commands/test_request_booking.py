@@ -114,6 +114,7 @@ async def _build_handler(
         resources=_FakeResourceRepo([resource]),
         subscriptions=_FakeSubRepo(sub or _make_active_sub(resource.owner_id)),
         notifications=notifs,
+        clock=_now,
     )
     return handler, bookings, notifs
 

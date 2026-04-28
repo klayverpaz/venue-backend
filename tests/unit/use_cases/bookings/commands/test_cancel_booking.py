@@ -84,6 +84,7 @@ async def _build_handler(*, resource):
             bookings=bookings,
             resources=_FakeResourceRepo([resource]),
             notifications=notifs,
+            clock=_now,
         ),
         bookings, notifs,
     )

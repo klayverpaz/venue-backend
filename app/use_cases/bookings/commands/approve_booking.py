@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 from uuid import UUID
 
 from app.domain.bookings.booking_status import BookingStatus
@@ -32,12 +33,14 @@ class ApproveBookingHandler:
         subscriptions: ISubscriptionRepository,
         notifications: INotificationService,
         lock: IBookingLockService,
+        clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._bookings = bookings
         self._resources = resources
         self._subscriptions = subscriptions
         self._notifications = notifications
         self._lock = lock
+        self._clock = clock
 
     async def handle(self, cmd: ApproveBookingCommand) -> Result[BookingDto]:
         # 1. Load booking — IBookingRepository.get_by_id returns Result[Booking | None].
@@ -77,7 +80,7 @@ class ApproveBookingHandler:
                 return Result.from_failure(competitors_r)
             competitors = competitors_r.value
 
-            now = _utcnow()
+            now = self._clock()
             approve_r = target.approve(actor_id=cmd.actor_id, now=now)
             if approve_r.is_failure:
                 return Result.failure("BookingInvalidStateTransition", status_code=409)

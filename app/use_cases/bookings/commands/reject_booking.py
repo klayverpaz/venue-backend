@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 from uuid import UUID
 
 from app.domain.bookings.repository import IBookingRepository
@@ -28,10 +29,12 @@ class RejectBookingHandler:
         bookings: IBookingRepository,
         resources: IResourceRepository,
         notifications: INotificationService,
+        clock: Callable[[], datetime] = _utcnow,
     ) -> None:
         self._bookings = bookings
         self._resources = resources
         self._notifications = notifications
+        self._clock = clock
 
     async def handle(self, cmd: RejectBookingCommand) -> Result[BookingDto]:
         # 1. Load booking — IBookingRepository.get_by_id returns Result[Booking | None].
@@ -49,7 +52,7 @@ class RejectBookingHandler:
 
         # 3. Transition domain state.
         transition = booking.reject(
-            actor_id=cmd.actor_id, now=_utcnow(), reason=cmd.reason,
+            actor_id=cmd.actor_id, now=self._clock(), reason=cmd.reason,
         )
         if transition.is_failure:
             return Result.failure(
