@@ -5,6 +5,13 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.db.session import get_session
+from app.infrastructure.notifications.persistent_notification_service import (
+    PersistentNotificationService,
+)
+from app.infrastructure.repositories.booking_repository import SQLAlchemyBookingRepository
+from app.infrastructure.repositories.notification_repository import (
+    SQLAlchemyNotificationRepository,
+)
 from app.infrastructure.repositories.resource_repository import SQLAlchemyResourceRepository
 from app.infrastructure.repositories.resource_type_repository import SQLAlchemyResourceTypeRepository
 from app.infrastructure.repositories.user_repository import UserRepository
@@ -83,8 +90,15 @@ async def get_unpublish_handler(res=Depends(_r)):
     return UnpublishResourceHandler(res)
 
 
-async def get_soft_delete_handler(res=Depends(_r)):
-    return SoftDeleteResourceHandler(res)
+async def get_soft_delete_handler(
+    s: Annotated[AsyncSession, Depends(get_session)],
+    res=Depends(_r),
+) -> SoftDeleteResourceHandler:
+    return SoftDeleteResourceHandler(
+        resources=res,
+        bookings=SQLAlchemyBookingRepository(s),
+        notifications=PersistentNotificationService(SQLAlchemyNotificationRepository(s)),
+    )
 
 
 async def get_get_my_handler(res=Depends(_r), u=Depends(_u), rt=Depends(_rt)):
