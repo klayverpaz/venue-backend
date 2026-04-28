@@ -198,6 +198,12 @@ ERROR_MESSAGES_PT_BR: dict[str, str] = {
     "BookingCancellationPastCutoff": "Prazo de cancelamento expirado.",
     "AgendaRangeTooWide": "Intervalo da agenda excede o máximo de 31 dias.",
     "ResourceHasFutureApprovedBookings": "Recurso possui reservas aprovadas futuras.",
+
+    # --- Plan 09 — ratings (handler-level) ---
+    "RatingNotFound": "Avaliação não encontrada.",
+    "RatingAlreadyExists": "Já existe uma avaliação para esta reserva.",
+    "BookingNotEligibleForRating": "Reserva não é elegível para avaliação.",
+    "RatingEditWindowExpired": "Prazo para editar a avaliação expirou.",
 }
 
 

@@ -141,6 +141,11 @@ def test_no_orphan_translations_in_mapping():
         "BookingCancellationPastCutoff",
         "AgendaRangeTooWide",
         "ResourceHasFutureApprovedBookings",
+        # Plan 09 — ratings handler-level
+        "RatingNotFound",
+        "RatingAlreadyExists",
+        "BookingNotEligibleForRating",
+        "RatingEditWindowExpired",
     }
     real_orphans = [c for c in orphans if c not in handler_level_allowlist]
 
