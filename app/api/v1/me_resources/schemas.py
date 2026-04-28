@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from app.use_cases.resources.dtos import (
     CustomAttributeDto, PricingRuleDto, ResourceDto, TimeWindowDto, WeeklyScheduleDto,
@@ -63,6 +63,10 @@ class ResourceResponse(BaseModel):
     updated_at: datetime
     rating_avg: Decimal | None = None
     rating_count: int = 0
+
+    @field_serializer("rating_avg")
+    def _serialize_rating_avg(self, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
     @classmethod
     def from_dto(cls, dto: ResourceDto) -> "ResourceResponse":

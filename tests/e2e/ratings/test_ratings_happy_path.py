@@ -111,8 +111,8 @@ async def test_happy_path_rate_appears_in_listings(
     )
     assert target_after is not None
     assert target_after["rating_count"] == 1
-    # rating_avg may be float or string depending on Pydantic Decimal handling.
-    assert str(target_after["rating_avg"]) == "5.0"
+    assert target_after["rating_avg"] == 5.0
+    assert isinstance(target_after["rating_avg"], (int, float))
 
     # 5. Customer updates the rating.
     upd = await client.patch(
