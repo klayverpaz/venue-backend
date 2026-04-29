@@ -1,7 +1,7 @@
 # Venue Backend — Design Spec
 
-**Date:** 2026-04-25
-**Status:** Approved (revised 2026-04-25 — VO foundation + ratings feature)
+**Date:** 2026-04-25 (last refreshed 2026-04-29)
+**Status:** Approved. Plans 01-09 implemented; Plan 10 (seed + production wiring) pending.
 **Source template:** `agentic-workbench/ai-ready-backend-template/`
 **Repository:** `git@github.com:klayverpaz/venue-backend.git`
 
@@ -17,7 +17,7 @@ Project name and folder: `venue-backend`. Located at `agentic-workbench/venue-ba
 
 | Role | Capabilities |
 |---|---|
-| **Admin** | Curates `ResourceType` catalog (admin-managed). Manages users (promote/demote roles, deactivate). Manages owner subscription status. Moderates ratings (hide/unhide). |
+| **Admin** | Curates `ResourceType` catalog (admin-managed). Manages users (promote/demote roles, deactivate). Manages owner subscription status. (Rating moderation deferred from MVP — see §5.7 Plan 09 deliberate cuts.) |
 | **Owner** | Registers and manages their `Resource`s. Defines operating hours, slot duration, pricing rules, custom attributes per resource. Reviews and approves/rejects/cancels bookings on their resources. Read-only view of their subscription status and ratings on their resources. |
 | **Customer** | Browses public resource listings, requests bookings (one or more consecutive slots) with a free-form note, sees their own bookings, cancels until configurable cutoff, rates resources after the booking ends. |
 
@@ -490,10 +490,13 @@ POST   /me/notifications/{id}/read
 # Resources
 POST   /me/resources
 GET    /me/resources                         # incl. rating_avg + rating_count per resource
+GET    /me/resources/{id}                    # incl. rating_avg + rating_count
 PATCH  /me/resources/{id}
 PATCH  /me/resources/{id}/operating-hours
 PATCH  /me/resources/{id}/pricing-rules
-PATCH  /me/resources/{id}/publish            # toggle is_published
+PATCH  /me/resources/{id}/slot-duration
+POST   /me/resources/{id}/publish            # is_published := true
+POST   /me/resources/{id}/unpublish           # is_published := false
 DELETE /me/resources/{id}                    # soft-delete; blocked if future approved bookings
 
 # Bookings on my resources
@@ -535,14 +538,16 @@ The plan order below is the contract for `docs/superpowers/plans/`.
 
 1. **Plan 01 — Bootstrap** ✅ done. Copy `ai-ready-backend-template/` → `agentic-workbench/venue-backend/` and apply Recipe A (remove AI module).
 2. **Plan 02 — Accounts** ✅ done. JWT auth + `accounts` feature with `Role` enum, replacing the `users` sample.
-3. **Plan 03 — VO foundation + accounts retrofit.** Ship the 12 new VOs (`Slug`, `Name`, `ShortName`, `ShortDescription`, `AttributeKey`, `Money`, `TimeWindow`, `DateTimeRange`, `IanaTimezone`, `SlotDuration`, `CancellationCutoff`, `RatingScore`) plus refactor existing `Email` and `BrazilianPhone` to the stable-code style. Update `app/api/error_handler.py` to map VO/handler error codes to pt-BR. Retrofit `accounts`: `User.full_name: str → Name`. Reset and regenerate Alembic migrations on top of the new VO-aware mappings.
-4. **Plan 04 — Catalog.** `ResourceType` aggregate using `Slug`/`Name`/`ShortDescription`/`AttributeKey`/`ShortName`. Admin CRUD + public listing.
-5. **Plan 05 — Subscriptions.** `OwnerSubscription` aggregate; admin-only mutation; `is_operational()` gating.
-6. **Plan 06 — Resources.** `Resource` aggregate using `Slug`/`Name`/`ShortDescription`/`Money`/`TimeWindow`/`IanaTimezone`/`SlotDuration`/`CancellationCutoff`. Owner CRUD + public read.
-7. **Plan 07 — Notifications.** `Notification` aggregate (persistent in-app inbox) + `INotificationRepository` + `PersistentNotificationService` adapter. `NotifKind` grows to 5 values: `SUBSCRIPTION_CHANGED` (existing) plus `BOOKING_REQUESTED` / `BOOKING_APPROVED` / `BOOKING_REJECTED` / `BOOKING_CANCELLED` (Plan 08 emits). `GET /v1/me/notifications` (cursor paged) + `POST /v1/me/notifications/{id}/read`. Email and `BOOKING_RATED` deferred — see plan-07 design doc §1.
-8. **Plan 08 — Bookings.** `Booking` aggregate (5-state machine PENDING → {APPROVED, REJECTED, CANCELLED, EXPIRED}; APPROVED → CANCELLED) + `IBookingRepository` + `IBookingLockService` (Postgres advisory_xact_lock + in-memory async-lock test adapter). 5 mutation handlers (request/approve-with-auto-rejection/reject/cancel/expire-cron); 4 query handlers (list-my, get-my, list-resource, agenda — shared public + owner shape). 10 endpoints (4 customer + 5 owner + 1 public agenda). Concurrency: Postgres `btree_gist` exclusion constraint as belt-and-suspenders. Plan 06 retroactives: `Resource.compute_price`, `Weekday.from_iso`, `SoftDeleteResourceHandler` cascade. Natural dedup replaces `Idempotency-Key` — see plan-08 design §1.
-9. **Plan 09 — Ratings.** `Rating` aggregate (per-booking, score 1-5 via `RatingScore` VO, optional `ShortDescription` comment, no moderation in MVP) + `IRatingRepository` (7 methods including batch `get_aggregates_for_resources`). 4 handlers: `CreateRatingHandler` (eligibility gate: APPROVED booking, slot ended, customer match, ≤90d window), `UpdateRatingHandler` (7d edit window), `ListMyRatingsHandler`, `ListPublicRatingsForResourceHandler` (comment-only filter). `Resource` GETs gain `rating_avg`/`rating_count` aggregates merged via a single batch query per page (no N+1). Owner page (`GET /owners/{slug}`) computes a count-weighted average. 4 new endpoints (3 customer + 1 public). Concurrency: DB UNIQUE on `booking_id` is the sole race protection. No moderation surface — see plan-09 design §1.
-10. **Plan 10 — Seed + production wiring.** Bootstrap admin account (env-driven), seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
+3. **Plan 03 — VO foundation + accounts retrofit** ✅ done. 12 new VOs (`Slug`, `Name`, `ShortName`, `ShortDescription`, `AttributeKey`, `Money`, `TimeWindow`, `DateTimeRange`, `IanaTimezone`, `SlotDuration`, `CancellationCutoff`, `RatingScore`) + `Email`/`BrazilianPhone` refactored to the stable-code style. `app/api/error_codes.py` maps VO/handler error codes to pt-BR.
+4. **Plan 04 — Catalog** ✅ done. `ResourceType` aggregate + admin CRUD + public listing.
+5. **Plan 05 — Subscriptions** ✅ done. `OwnerSubscription` aggregate; admin-only mutation; `is_operational()` gating; trial-expiry cron.
+6. **Plan 06 — Resources** ✅ done (2026-04-26, 39 tasks via subagent-driven; final commit `e367392`). `Resource` aggregate + owner CRUD + public read. Includes the 2026-04-26 multi-error envelope interlude.
+7. **Plan 07 — Notifications** ✅ done (2026-04-27, 17 tasks; range `e63156f..614e20a` + polish `ed6725a..09a6a44`). `Notification` aggregate (persistent in-app inbox) + `INotificationRepository` + `PersistentNotificationService` adapter. `NotifKind` has 5 values: `SUBSCRIPTION_CHANGED` (existing) plus `BOOKING_REQUESTED` / `BOOKING_APPROVED` / `BOOKING_REJECTED` / `BOOKING_CANCELLED` (Plan 08 emits). `GET /v1/me/notifications` (cursor paged) + `POST /v1/me/notifications/{id}/read`. Email and `BOOKING_RATED` deferred — see plan-07 design doc §1.
+8. **Plan 08 — Bookings** ✅ done (2026-04-28, 32 tasks + 3 polish; range `c39eb4a..be7adfd`). `Booking` aggregate (5-state machine PENDING → {APPROVED, REJECTED, CANCELLED, EXPIRED}; APPROVED → CANCELLED) + `IBookingRepository` + `IBookingLockService` (Postgres advisory_xact_lock + in-memory async-lock test adapter). 5 mutation handlers (request/approve-with-auto-rejection/reject/cancel/expire-cron); 4 query handlers (list-my, get-my, list-resource, agenda — shared public + owner shape). 10 endpoints (4 customer + 5 owner + 1 public agenda). Concurrency: Postgres `btree_gist` exclusion constraint as belt-and-suspenders. Plan 06 retroactives: `Resource.compute_price`, `Weekday.from_iso`, `SoftDeleteResourceHandler` cascade. Natural dedup replaces `Idempotency-Key` — see plan-08 design §1.
+9. **Plan 09 — Ratings** ✅ done (2026-04-28, 14 tasks + 3 polish; range `b45770e..bcc73a6`). `Rating` aggregate (per-booking, score 1-5 via `RatingScore` VO, optional `ShortDescription` comment, no moderation in MVP) + `IRatingRepository` (7 methods including batch `get_aggregates_for_resources`). 4 handlers: `CreateRatingHandler` (eligibility gate: APPROVED booking, slot ended, customer match, ≤90d window), `UpdateRatingHandler` (7d edit window), `ListMyRatingsHandler`, `ListPublicRatingsForResourceHandler` (comment-only filter). `Resource` GETs gain `rating_avg`/`rating_count` aggregates merged via a single batch query per page (no N+1). Owner page (`GET /owners/{slug}`) computes a count-weighted average. 4 new endpoints (3 customer + 1 public). Concurrency: DB UNIQUE on `booking_id` is the sole race protection. No moderation surface — see plan-09 design §1.
+10. **Plan 10 — Seed + production wiring** ⏳ pending. Docker compose + Postgres bootstrap, env-driven admin account creation, seed `ResourceType("Football Field")`. Postgres-only. MSSQL files stay as the template provides them but unused.
+
+**Implementation status snapshot (2026-04-29):** 623 tests passing + 1 environment-skip; 43 unique HTTP routes wired; Plans 01-09 closed end-to-end on `main`. Last polish commit: `bcc73a6`. Roadmap remaining: Plan 10 only.
 
 ## 9. Testing strategy
 
