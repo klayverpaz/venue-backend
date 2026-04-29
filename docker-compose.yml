@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-venue}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-venue}
+      POSTGRES_DB: ${POSTGRES_DB:-venue}
+    ports:
+      - "5432:5432"
+    volumes:
+      - venue_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-venue} -d ${POSTGRES_DB:-venue}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mount for live-reload during dev. Anonymous volumes shadow the
+      # host's local caches/venv so the container's installed packages win.
+      - .:/app
+      - /app/.venv
+      - /app/.mypy_cache
+      - /app/.pytest_cache
+      - /app/.ruff_cache
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  venue_pgdata:
